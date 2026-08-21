@@ -13,12 +13,17 @@ import {
 import { useFeederStore } from '@/store/feeder-store';
 import { PassengerView } from './PassengerView';
 import { DriverView } from './DriverView';
+import { AdminView } from './AdminView';
 import {
   Train as TrainIcon,
   User,
   Car,
   Info,
   X,
+  Shield,
+  Crown,
+  Anchor,
+  MapPin,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -50,31 +55,12 @@ export function FeederApp() {
           </button>
         </div>
 
-        {/* Role switcher */}
+        {/* Role switcher — 3 roles */}
         <div className="mx-auto max-w-md px-4 pb-2.5">
-          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-secondary/60">
-            <button
-              onClick={() => setRole('passenger')}
-              className={cn(
-                'flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium transition-all',
-                role === 'passenger'
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground',
-              )}
-            >
-              <User className="w-3.5 h-3.5" /> Passenger
-            </button>
-            <button
-              onClick={() => setRole('driver')}
-              className={cn(
-                'flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium transition-all',
-                role === 'driver'
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground',
-              )}
-            >
-              <Car className="w-3.5 h-3.5" /> Driver
-            </button>
+          <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-secondary/60">
+            <RoleButton active={role === 'passenger'} onClick={() => setRole('passenger')} icon={<User className="w-3.5 h-3.5" />} label="Passenger" />
+            <RoleButton active={role === 'driver'} onClick={() => setRole('driver')} icon={<Car className="w-3.5 h-3.5" />} label="Driver" />
+            <RoleButton active={role === 'admin'} onClick={() => setRole('admin')} icon={<Shield className="w-3.5 h-3.5" />} label="Admin" />
           </div>
         </div>
       </header>
@@ -82,7 +68,7 @@ export function FeederApp() {
       {/* Main content */}
       <main className="flex-1 mx-auto max-w-md w-full px-4 py-4">
         <AnimatePresence mode="wait">
-          {role === 'passenger' ? (
+          {role === 'passenger' && (
             <motion.div
               key="passenger"
               initial={{ opacity: 0, x: -10 }}
@@ -92,7 +78,8 @@ export function FeederApp() {
             >
               <PassengerView />
             </motion.div>
-          ) : (
+          )}
+          {role === 'driver' && (
             <motion.div
               key="driver"
               initial={{ opacity: 0, x: 10 }}
@@ -101,6 +88,17 @@ export function FeederApp() {
               transition={{ duration: 0.18 }}
             >
               <DriverView />
+            </motion.div>
+          )}
+          {role === 'admin' && (
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.18 }}
+            >
+              <AdminView />
             </motion.div>
           )}
         </AnimatePresence>
@@ -118,74 +116,114 @@ export function FeederApp() {
   );
 }
 
+function RoleButton({ active, onClick, icon, label }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium transition-all',
+        active ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground',
+      )}
+    >
+      {icon} {label}
+    </button>
+  );
+}
+
 function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const settings = useFeederStore(s => s.settings);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto">
+      <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="text-xl">About this prototype</SheetTitle>
+          <SheetTitle className="text-xl">SGR Feeder — about</SheetTitle>
           <SheetDescription>
-            A working prototype of the SGR Feeder app — converts the informal "wait until full"
-            stage mechanic into digital fill-up, with reverse-engineered trip timing.
+            An end-to-end prototype covering passenger booking, driver dispatch, and admin monitoring
+            of cab–passenger connections at the Mombasa Terminus.
           </SheetDescription>
         </SheetHeader>
 
         <div className="px-4 pb-6 space-y-4 text-sm">
           <section className="space-y-1.5">
-            <h3 className="font-semibold text-base">The core problem</h3>
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <TrainIcon className="w-4 h-4" /> Trains
+            </h3>
             <p className="text-muted-foreground">
-              SGR cabs (4/7/11/14-seaters) can't leave the stage until they're full. Today, that depends
-              on strangers showing up in real time — so the departure time is unpredictable, and that
-              unpredictability eats into the check-in / ticketing / security buffer passengers need
-              to catch their train.
+              <span className="font-medium text-foreground">Departures</span> (Mombasa → Nairobi): 08:00, 15:00, 22:00<br />
+              <span className="font-medium text-foreground">Arrivals</span> (Nairobi → Mombasa): 04:00, 14:00, 20:30
             </p>
           </section>
 
           <section className="space-y-1.5">
-            <h3 className="font-semibold text-base">The fix: book until full</h3>
-            <p className="text-muted-foreground">
-              Each cab posts a trip tied to a specific train. Passengers reserve seats in advance.
-              The driver sees the seat count fill virtually — "3 of 7 booked" — hours before anyone
-              is physically at the stage. Once a cab hits 70% (or the cutoff arrives), departure locks
-              in and everyone gets notified with the pickup time.
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <MapPin className="w-4 h-4" /> Stages (agreed SGR collection points)
+            </h3>
+            <p className="text-muted-foreground text-xs">
+              <span className="font-medium text-foreground">South Coast:</span> Likoni Ferry Container · Fayaz (Kona Mpya) · ShikaAdabu (Checkpoint) · Kombani · Naivas Diani<br />
+              <span className="font-medium text-foreground">North Coast:</span> Kimbeni · Mtambo · Mtwapa · Malindi (location TBD)
             </p>
           </section>
 
           <section className="space-y-1.5">
-            <h3 className="font-semibold text-base">Reverse-engineered leave time</h3>
-            <p className="text-muted-foreground">
-              The app works out, per route and per train, the latest time a cab can leave the pickup
-              point and still get passengers to the train on time:
-            </p>
-            <pre className="bg-secondary/60 rounded-lg p-3 text-[11px] font-mono overflow-x-auto">
-{`latestLeave = trainDeparture
-              - securityBuffer (15m)
-              - ticketingBuffer (20m, skip if has e-ticket)
-              - checkInBuffer (10m)
-              - travelTime (peak-adjusted)`}
-            </pre>
-            <p className="text-muted-foreground">
-              If a passenger already has their e-ticket, the ticketing buffer is skipped — they can
-              leave 20 minutes later and still catch the same train.
-            </p>
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <Crown className="w-4 h-4 text-violet-600" /> Fare model
+            </h3>
+            <ul className="text-muted-foreground space-y-1 list-disc pl-4 text-xs">
+              <li>Base fare <span className="font-medium text-foreground">KSh {settings.baseFareStage}</span> per seat for stage pickup (pooled)</li>
+              <li>Off-stage: +<span className="font-medium text-foreground">KSh {settings.offStageSurchargePerKm}/km</span> beyond stage, capped at {settings.offStageMaxRadiusKm} km (beyond: "meet at nearest stage")</li>
+              <li>Private charter: base × capacity × <span className="font-medium text-foreground">{settings.charterMultiplier}x</span> multiplier</li>
+              <li>Nudge discount: {settings.nudgeDiscountPct}% off within {settings.nudgeWindowMin}m of cutoff</li>
+            </ul>
           </section>
 
           <section className="space-y-1.5">
-            <h3 className="font-semibold text-base">Return leg: dispersal matching</h3>
-            <p className="text-muted-foreground">
-              Getting to the terminus is many-to-one. The return leg is the opposite — one terminus,
-              scattered destinations (Jomvu, Miritini, Nyali, Bamburi, CBD, Shanzu). The outbound side
-              pools arriving passengers by zone so a cab fills up by destination instead of by waiting
-              at a stage. Drivers are notified ahead of the train's arrival so they're positioned to pool.
-            </p>
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <User className="w-4 h-4" /> Passenger side
+            </h3>
+            <ul className="text-muted-foreground space-y-1 list-disc pl-4 text-xs">
+              <li>Pick a direction (to/from terminus), a train, and a stage</li>
+              <li>Choose stage pickup or off-stage (with distance slider that affects fare live)</li>
+              <li>Toggle "Book the whole vehicle" to switch to private charter</li>
+              <li>Reserve a seat; see reverse-engineered leave time for departures</li>
+            </ul>
           </section>
 
           <section className="space-y-1.5">
-            <h3 className="font-semibold text-base">Try it</h3>
-            <ul className="text-muted-foreground space-y-1 list-disc pl-4">
-              <li>Passenger side: pick the 15:00 train, reserve a seat, toggle "I have my e-ticket" to see the leave time shift.</li>
-              <li>Driver side: see your manifest, accept incoming requests, watch the threshold fill up, start the trip.</li>
-              <li>Switch direction to "From Terminus" to see outbound pooling.</li>
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <Car className="w-4 h-4" /> Driver side
+            </h3>
+            <ul className="text-muted-foreground space-y-1 list-disc pl-4 text-xs">
+              <li>See manifest, fill threshold, accept/decline pooled requests</li>
+              <li>Charter requests appear only if driver has no active pooled bookings</li>
+              <li>Accepting a charter locks the cab — pooled requests hidden</li>
+              <li>Start trip once threshold met (or charter accepted)</li>
+            </ul>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <Shield className="w-4 h-4" /> Admin side (arrival monitoring)
+            </h3>
+            <ul className="text-muted-foreground space-y-1 list-disc pl-4 text-xs">
+              <li><span className="font-medium">Arrivals tab</span>: per arriving train, see cabs positioned at each stage, waiting passengers, and coverage gaps</li>
+              <li><span className="font-medium">Departures tab</span>: per departing train, cab fill status and threshold progress</li>
+              <li><span className="font-medium">Stages tab</span>: full stage coverage map with inbound/outbound cab counts and gaps</li>
+              <li><span className="font-medium">Charters tab</span>: all charter bookings and pending requests across the system</li>
+              <li>Top alert surfaces coverage gaps (passengers waiting, no cab assigned)</li>
+            </ul>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="font-semibold text-base flex items-center gap-1.5">
+              <Anchor className="w-4 h-4 text-violet-600" /> Try it
+            </h3>
+            <ul className="text-muted-foreground space-y-1 list-disc pl-4 text-xs">
+              <li><b>Admin → Arrivals → 14:00 train</b>: see Likoni cluster gap (Fayaz & ShikaAdabu have passengers, no cab)</li>
+              <li><b>Passenger → From Terminus → 14:00</b>: toggle off-stage, drag distance slider past 3km cap</li>
+              <li><b>Passenger → book charter</b>: see fare = 450 × capacity × 1.3</li>
+              <li><b>Driver → charter request</b>: see the lockout confirmation flow</li>
             </ul>
           </section>
 

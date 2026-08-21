@@ -5,11 +5,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ROUTES, TRAINS } from '@/lib/feeder/seed';
-import { computeTripTiming, nudgeFare } from '@/lib/feeder/calc';
-import type { Cab } from '@/lib/feeder/types';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { STAGES, TRAINS, TRAINS_BY_DIR } from '@/lib/feeder/seed';
+import { computeTripTiming, nudgeFare, computeFare } from '@/lib/feeder/calc';
+import type { Cab, Stage, Train } from '@/lib/feeder/types';
 import { useFeederStore } from '@/store/feeder-store';
-import { SeatMeter, Stars, StatusBadge, TrainPill } from './Shared';
+import { SeatMeter, Stars, StatusBadge, TrainPill, CharterBadge } from './Shared';
 import { LeaveCountdownBadge } from './TripTiming';
 import { BookingSheet } from './BookingSheet';
 import {
@@ -21,6 +25,12 @@ import {
   Info,
   Navigation,
   Car,
+  Crown,
+  Ruler,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  Anchor,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,47 +39,65 @@ export function PassengerView() {
   const setDirection = useFeederStore(s => s.setPassengerDirection);
   const selectedTrainId = useFeederStore(s => s.selectedTrainId);
   const setSelectedTrainId = useFeederStore(s => s.setSelectedTrainId);
-  const selectedOutboundZoneId = useFeederStore(s => s.selectedOutboundZoneId);
-  const setSelectedOutboundZoneId = useFeederStore(s => s.setSelectedOutboundZoneId);
+  const selectedStageId = useFeederStore(s => s.selectedStageId);
+  const setSelectedStageId = useFeederStore(s => s.setSelectedStageId);
+  const pickupKind = useFeederStore(s => s.pickupKind);
+  const setPickupKind = useFeederStore(s => s.setPickupKind);
+  const offStageDistanceKm = useFeederStore(s => s.offStageDistanceKm);
+  const setOffStageDistanceKm = useFeederStore(s => s.setOffStageDistanceKm);
+  const bookingKind = useFeederStore(s => s.bookingKind);
+  const setBookingKind = useFeederStore(s => s.setBookingKind);
   const cabs = useFeederStore(s => s.cabs);
   const bookings = useFeederStore(s => s.bookings);
   const settings = useFeederStore(s => s.settings);
-  const cancelBooking = useFeederStore(s => s.cancelBooking);
 
   const [selectedCab, setSelectedCab] = useState<Cab | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const myBookings = bookings.filter(b => b.status !== 'cancelled' && b.isMine);
 
-  const inboundCabs = useMemo(
-    () => cabs.filter(c => c.direction === 'inbound' && c.trainId === selectedTrainId),
-    [cabs, selectedTrainId],
-  );
+  const trains = direction === 'inbound' ? TRAINS_BY_DIR.inbound : TRAINS_BY_DIR.outbound;
+  const selectedTrain = trains.find(t => t.id === selectedTrainId) ?? trains[0];
 
-  const outboundCabs = useMemo(
-    () => selectedOutboundZoneId
-      ? cabs.filter(c => c.direction === 'outbound' && c.routeId === selectedOutboundZoneId)
-      : [],
-    [cabs, selectedOutboundZoneId],
-  );
-
-  const outboundZones = ROUTES.filter(r => r.zone === 'outbound');
-
-  // Count waiting passengers per outbound zone (from bookings on any outbound cab in that zone)
-  const outboundZoneCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const r of outboundZones) {
-      map[r.id] = cabs
-        .filter(c => c.direction === 'outbound' && c.routeId === r.id)
-        .reduce((sum, c) => sum + c.bookedSeats, 0);
+  // Group stages by area for the picker
+  const stagesByArea = useMemo(() => {
+    const map = new Map<string, Stage[]>();
+    for (const s of STAGES) {
+      if (!map.has(s.area)) map.set(s.area, []);
+      map.get(s.area)!.push(s);
     }
-    return map;
-  }, [cabs, outboundZones]);
+    return Array.from(map.entries());
+  }, []);
+
+  // Available cabs for the selected train + stage
+  const availableCabs = useMemo(() => {
+    let list = cabs.filter(c =>
+      c.trainId === selectedTrainId &&
+      c.direction === direction &&
+      c.status === 'filling' &&
+      !c.charterLocked &&
+      (c.bookedSeats < c.capacity),
+    );
+    if (selectedStageId) {
+      list = list.filter(c => c.stageId === selectedStageId);
+    }
+    return list;
+  }, [cabs, selectedTrainId, selectedStageId, direction]);
 
   function openBooking(cab: Cab) {
     setSelectedCab(cab);
     setSheetOpen(true);
   }
+
+  // Live fare preview for the current pickupKind + distance + bookingKind
+  const previewCapacity = selectedCab?.capacity ?? 4;
+  const farePreview = computeFare({
+    settings,
+    pickupKind,
+    offStageDistanceKm: pickupKind === 'off-stage' ? offStageDistanceKm : undefined,
+    kind: bookingKind,
+    capacity: previewCapacity,
+  });
 
   return (
     <div className="space-y-4 pb-4">
@@ -80,167 +108,289 @@ export function PassengerView() {
             <Navigation className="w-3.5 h-3.5" /> To Terminus
           </TabsTrigger>
           <TabsTrigger value="outbound" className="flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5" /> From Terminus
+            <Anchor className="w-3.5 h-3.5" /> From Terminus
           </TabsTrigger>
         </TabsList>
       </Tabs>
 
       <AnimatePresence mode="wait">
-        {direction === 'inbound' ? (
-          <motion.div
-            key="inbound"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18 }}
-            className="space-y-4"
-          >
-            {/* Train selector */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                <TrainIcon className="w-3.5 h-3.5" /> Catching which train?
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                {TRAINS.map(t => (
-                  <TrainPill
-                    key={t.id}
-                    code={t.code}
-                    time={t.departureTime}
-                    active={selectedTrainId === t.id}
-                    onClick={() => setSelectedTrainId(t.id)}
-                  />
-                ))}
-              </div>
+        <motion.div
+          key={direction}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="space-y-4"
+        >
+          {/* Train selector */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+              <TrainIcon className="w-3.5 h-3.5" />
+              {direction === 'inbound' ? 'Catching which train?' : 'Arriving on which train?'}
             </div>
-
-            {/* Available cabs for selected train */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium">Available cabs</h3>
-                <span className="text-xs text-muted-foreground">{inboundCabs.length} cabs filling</span>
-              </div>
-
-              {inboundCabs.length === 0 && (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    No cabs posted for this train yet.
-                  </CardContent>
-                </Card>
-              )}
-
-              {inboundCabs.map(cab => (
-                <InboundCabCard
-                  key={cab.id}
-                  cab={cab}
-                  settings={settings}
-                  onBook={() => openBooking(cab)}
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+              {trains.map(t => (
+                <TrainPill
+                  key={t.id}
+                  code={t.code}
+                  time={t.time}
+                  direction={direction}
+                  active={selectedTrainId === t.id}
+                  onClick={() => setSelectedTrainId(t.id)}
                 />
               ))}
             </div>
+          </div>
 
-            {/* How it works */}
-            <Card className="border-dashed">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" /> How fill-up works
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-xs text-muted-foreground space-y-1.5 pt-0">
-                <p>Each cab posts a trip tied to a specific train. The app works out the latest time the cab can leave your pickup point and still get you to the train on time — accounting for travel, security, ticketing, and check-in.</p>
-                <p>Reserve a seat ahead of time. Once the cab hits 70% booked (or the cutoff arrives), departure locks in and everyone gets notified.</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="outbound"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18 }}
-            className="space-y-4"
-          >
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-1.5">
-                  <MapPin className="w-4 h-4" /> Where are you heading?
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <p className="text-xs text-muted-foreground mb-3">
-                  You're arriving at Mombasa Terminus. Pick a destination zone and we'll pool you with passengers heading the same way.
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {outboundZones.map(zone => {
-                    const count = outboundZoneCounts[zone.id] || 0;
-                    const active = selectedOutboundZoneId === zone.id;
-                    return (
-                      <button
-                        key={zone.id}
-                        onClick={() => setSelectedOutboundZoneId(zone.id)}
-                        className={cn(
-                          'text-left p-3 rounded-xl border transition-all',
-                          active
-                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                            : 'bg-card hover:bg-accent border-border',
-                        )}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{zone.name}</span>
-                          {count > 0 && (
-                            <span className={cn(
-                              'text-[10px] px-1.5 py-0.5 rounded-full',
-                              active ? 'bg-primary-foreground/20' : 'bg-secondary',
-                            )}>
-                              {count} waiting
-                            </span>
-                          )}
-                        </div>
-                        <div className={cn(
-                          'text-[11px] mt-0.5',
-                          active ? 'opacity-80' : 'text-muted-foreground',
-                        )}>
-                          ~{zone.travelMin}m · KSh {zone.baseFare}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-
-            {selectedOutboundZoneId && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">Pooled cabs to {outboundZones.find(z => z.id === selectedOutboundZoneId)?.name}</h3>
-                  <span className="text-xs text-muted-foreground">{outboundCabs.length} cabs</span>
-                </div>
-                {outboundCabs.map(cab => (
-                  <OutboundCabCard key={cab.id} cab={cab} onJoin={() => openBooking(cab)} />
-                ))}
-                {outboundCabs.length === 0 && (
-                  <Card>
-                    <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                      No cabs positioned for this zone yet. Drivers get a heads-up before your train arrives.
-                    </CardContent>
-                  </Card>
-                )}
+          {/* Stage picker */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+                <MapPin className="w-3.5 h-3.5" /> Pickup stage
               </div>
+              {selectedStageId && (
+                <button
+                  onClick={() => setSelectedStageId(null)}
+                  className="text-[11px] text-primary hover:underline"
+                >
+                  Show all stages
+                </button>
+              )}
+            </div>
+            <div className="space-y-2">
+              {stagesByArea.map(([area, stages]) => (
+                <div key={area}>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
+                    {stages[0].coast === 'south' ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 text-[9px] uppercase">South Coast</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] uppercase">North Coast</span>
+                    )}
+                    <span>{area}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {stages.map(stage => {
+                      const active = selectedStageId === stage.id;
+                      const waitingPassengers = useFeederStore.getState().getPassengersWaitingAtStage(stage.id);
+                      return (
+                        <button
+                          key={stage.id}
+                          onClick={() => setSelectedStageId(active ? null : stage.id)}
+                          className={cn(
+                            'text-left p-2 rounded-lg border text-xs transition-all',
+                            active
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'bg-card hover:bg-accent border-border',
+                          )}
+                        >
+                          <div className="font-medium truncate">{stage.name}</div>
+                          <div className={cn('text-[10px] mt-0.5', active ? 'opacity-80' : 'text-muted-foreground')}>
+                            ~{stage.travelMin}m · KSh {settings.baseFareStage}
+                          </div>
+                          {waitingPassengers > 0 && (
+                            <div className={cn(
+                              'text-[10px] mt-0.5 inline-flex items-center gap-0.5',
+                              active ? 'opacity-80' : 'text-amber-700',
+                            )}>
+                              <Users className="w-2.5 h-2.5" /> {waitingPassengers} waiting
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Pickup options: stage vs off-stage + charter toggle */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                <Car className="w-4 h-4" /> Pickup options
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {/* Pickup kind toggle */}
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-secondary/60">
+                <button
+                  onClick={() => setPickupKind('stage')}
+                  disabled={bookingKind === 'charter'}
+                  className={cn(
+                    'flex items-center justify-center gap-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                    pickupKind === 'stage'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground',
+                    bookingKind === 'charter' && 'opacity-40 cursor-not-allowed',
+                  )}
+                >
+                  <MapPin className="w-3 h-3" /> At stage
+                </button>
+                <button
+                  onClick={() => setPickupKind('off-stage')}
+                  disabled={bookingKind === 'charter'}
+                  className={cn(
+                    'flex items-center justify-center gap-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                    pickupKind === 'off-stage'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground',
+                    bookingKind === 'charter' && 'opacity-40 cursor-not-allowed',
+                  )}
+                >
+                  <Ruler className="w-3 h-3" /> Off-stage
+                </button>
+              </div>
+
+              {/* Off-stage distance slider */}
+              <AnimatePresence>
+                {pickupKind === 'off-stage' && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <Label className="text-muted-foreground">Distance from nearest stage</Label>
+                      <span className="font-semibold tabular-nums">{offStageDistanceKm.toFixed(1)} km</span>
+                    </div>
+                    <Slider
+                      value={[offStageDistanceKm]}
+                      onValueChange={(v) => setOffStageDistanceKm(v[0])}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                    />
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>0 km</span>
+                      <span className={cn(offStageDistanceKm > settings.offStageMaxRadiusKm && 'text-destructive font-medium')}>
+                        Cap: {settings.offStageMaxRadiusKm} km
+                      </span>
+                      <span>5 km</span>
+                    </div>
+                    {offStageDistanceKm > settings.offStageMaxRadiusKm && (
+                      <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-900">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          Beyond {settings.offStageMaxRadiusKm} km, the app says "please meet at the nearest stage."
+                          Fare is capped at the maximum-radius surcharge.
+                        </span>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Charter toggle */}
+              <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+                <div className="flex-1">
+                  <Label className="text-sm font-medium flex items-center gap-1">
+                    <Crown className="w-4 h-4 text-violet-600" /> Book the whole vehicle (private)
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Reserve the entire cab for your family/group. Driver commits to skipping pooling for this run.
+                    Pricing: base × capacity × {settings.charterMultiplier}x charter multiplier.
+                  </p>
+                </div>
+                <Switch
+                  checked={bookingKind === 'charter'}
+                  onCheckedChange={(c) => {
+                    setBookingKind(c ? 'charter' : 'pooled');
+                    if (c) setPickupKind('stage');
+                  }}
+                />
+              </div>
+
+              {/* Live fare preview */}
+              <div className="rounded-lg bg-card border p-3 space-y-1.5">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Live fare preview</div>
+                <div className="space-y-1 text-xs">
+                  <Row label="Base (per seat)" value={`KSh ${farePreview.base}`} />
+                  {farePreview.surcharge > 0 && (
+                    <Row
+                      label={`Distance surcharge (${offStageDistanceKm.toFixed(1)} km × KSh ${settings.offStageSurchargePerKm})`}
+                      value={`+KSh ${farePreview.surcharge}`}
+                    />
+                  )}
+                  <Row label="Per seat" value={`KSh ${farePreview.perSeat}`} />
+                  {bookingKind === 'charter' && (
+                    <>
+                      <Row label={`Seats (whole vehicle)`} value={`${farePreview.seats}`} />
+                      <Row label="Subtotal" value={`KSh ${farePreview.subtotal}`} />
+                      <Row
+                        label={`Charter premium (${((settings.charterMultiplier - 1) * 100).toFixed(0)}%)`}
+                        value={`+KSh ${farePreview.charterPremium}`}
+                      />
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1.5 border-t">
+                  <span className="text-sm font-medium">Total</span>
+                  <span className="text-lg font-bold tabular-nums text-primary">KSh {farePreview.total}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Available cabs */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium">
+                {bookingKind === 'charter' ? 'Available for charter' : 'Available pooled cabs'}
+              </h3>
+              <span className="text-xs text-muted-foreground">{availableCabs.length} cabs</span>
+            </div>
+
+            {availableCabs.length === 0 && (
+              <Card>
+                <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                  {selectedStageId
+                    ? 'No cabs at this stage for this train. Try another stage or "Show all stages".'
+                    : 'No cabs posted for this train yet.'}
+                </CardContent>
+              </Card>
             )}
 
-            <Card className="border-dashed">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" /> Dispersal matching
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-xs text-muted-foreground space-y-1.5 pt-0">
-                <p>Getting to the terminus is many-to-one. The return leg is the opposite — one terminus, scattered destinations. This side pools arriving passengers by zone so a cab fills up by destination, not by waiting at a stage.</p>
-                <p>Drivers are notified ahead of your train's arrival so they're positioned and ready to pool.</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+            {availableCabs.map(cab => {
+              const stage = STAGES.find(s => s.id === cab.stageId)!;
+              const train = TRAINS.find(t => t.id === cab.trainId)!;
+              const timing = computeTripTiming(cab, stage, train, settings, false);
+              const fare = nudgeFare(cab, timing, settings);
+              const full = cab.bookedSeats >= cab.capacity;
+              const charterBlocked = bookingKind === 'charter' && cab.bookedSeats > 0;
+
+              return (
+                <motion.div key={cab.id} layout whileTap={{ scale: 0.99 }}>
+                  <CabCard
+                    cab={cab}
+                    stage={stage}
+                    train={train}
+                    fare={fare}
+                    timing={timing}
+                    full={full || charterBlocked}
+                    bookingKind={bookingKind}
+                    onBook={() => openBooking(cab)}
+                  />
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* How it works */}
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" /> How stages & fares work
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground space-y-1.5 pt-0">
+              <p>Drivers use the existing SGR waiting/collection points as stages. Pick one to see cabs positioned there. Each cab is tied to a specific train and fills up digitally ahead of time.</p>
+              <p>Base fare is <span className="font-medium text-foreground">KSh {settings.baseFareStage}</span> for stage pickup. Off-stage pickup adds <span className="font-medium text-foreground">KSh {settings.offStageSurchargePerKm}/km</span> beyond the stage, capped at {settings.offStageMaxRadiusKm} km — beyond that, please meet at the nearest stage.</p>
+              <p>Private charter = book the whole vehicle. Driver commits to skipping pooling for this run, and you pay the full-vehicle fare.</p>
+            </CardContent>
+          </Card>
+        </motion.div>
       </AnimatePresence>
 
       {/* My bookings */}
@@ -252,34 +402,26 @@ export function PassengerView() {
           {myBookings.map(b => {
             const cab = cabs.find(c => c.id === b.cabId);
             if (!cab) return null;
-            const route = ROUTES.find(r => r.id === cab.routeId);
+            const stage = STAGES.find(s => s.id === b.stageId);
             const train = TRAINS.find(t => t.id === cab.trainId);
             return (
-              <Card key={b.id}>
+              <Card key={b.id} className={cn(b.kind === 'charter' && 'border-violet-300 bg-violet-50/30')}>
                 <CardContent className="p-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-sm font-medium">
-                      <span>{route?.name}</span>
-                      <ArrowRight className="w-3 h-3 text-muted-foreground" />
-                      <span className="text-muted-foreground">{train?.code} · {train?.departureTime}</span>
+                      <span>{stage?.name ?? b.pickupPoint}</span>
+                      {b.kind === 'charter' && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-900">
+                          <Crown className="w-2.5 h-2.5" /> Charter
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      {cab.cabType} · {cab.plateNumber} · {b.pickupPoint}
+                      {cab.cabType} · {cab.plateNumber} · {train?.code} {train?.time}
                     </div>
+                    <div className="text-xs font-medium mt-0.5">KSh {b.farePaid}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={cab.status} />
-                    {cab.status === 'filling' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive h-7 text-xs"
-                        onClick={() => cancelBooking(b.id)}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
+                  <StatusBadge status={cab.status} />
                 </CardContent>
               </Card>
             );
@@ -292,127 +434,89 @@ export function PassengerView() {
   );
 }
 
-function InboundCabCard({ cab, settings, onBook }: {
-  cab: Cab; settings: ReturnType<typeof useFeederStore.getState>['settings']; onBook: () => void;
-}) {
-  const route = ROUTES.find(r => r.id === cab.routeId)!;
-  const train = TRAINS.find(t => t.id === cab.trainId)!;
-  const timing = computeTripTiming(cab, route, train, settings, false);
-  const fare = nudgeFare(cab, timing, settings);
-  const full = cab.bookedSeats >= cab.capacity;
-
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <motion.div
-      layout
-      whileTap={{ scale: 0.99 }}
-    >
-      <Card className="overflow-hidden">
-        <CardContent className="p-3 space-y-2.5">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">{route.name}</span>
-                <StatusBadge status={cab.status} />
-                {timing.shouldNudge && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900">
-                    <Sparkles className="w-2.5 h-2.5" /> -10% fare
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                <span>{cab.driverName}</span>
-                <Stars rating={cab.driverRating} />
-                <span className="text-muted-foreground/50">•</span>
-                <span className="font-mono">{cab.plateNumber}</span>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Fare</div>
-              <div className="font-bold text-primary tabular-nums">KSh {fare}</div>
-              {fare < cab.baseFare && (
-                <div className="text-[10px] line-through text-muted-foreground">KSh {cab.baseFare}</div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs">
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Car className="w-3.5 h-3.5" />
-                <span className="font-medium text-foreground">{cab.cabType}</span>
-              </div>
-              <LeaveCountdownBadge timing={timing} />
-            </div>
-            <SeatMeter booked={cab.bookedSeats} capacity={cab.capacity} />
-          </div>
-
-          <Button
-            className="w-full h-9"
-            size="sm"
-            disabled={full || cab.status !== 'filling'}
-            onClick={onBook}
-          >
-            {full ? 'Sold out' : cab.status === 'filling' ? 'Reserve seat' : 'Already departed'}
-          </Button>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">{value}</span>
+    </div>
   );
 }
 
-function OutboundCabCard({ cab, onJoin }: { cab: Cab; onJoin: () => void }) {
-  const route = ROUTES.find(r => r.id === cab.routeId)!;
-  const train = TRAINS.find(t => t.id === cab.trainId)!;
-  const full = cab.bookedSeats >= cab.capacity;
-
-  // Outbound: train arrives at terminus, then cab pools passengers
+function CabCard({ cab, stage, train, fare, timing, full, bookingKind, onBook }: {
+  cab: Cab; stage: Stage; train: Train; fare: number;
+  timing: ReturnType<typeof computeTripTiming>;
+  full: boolean; bookingKind: 'pooled' | 'charter'; onBook: () => void;
+}) {
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardContent className="p-3 space-y-2.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm">{cab.driverName}'s {cab.cabType}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm">{stage.name}</span>
               <StatusBadge status={cab.status} />
+              {timing.shouldNudge && bookingKind === 'pooled' && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                  <Sparkles className="w-2.5 h-2.5" /> -10% fare
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              <span>{cab.driverName}</span>
               <Stars rating={cab.driverRating} />
               <span className="text-muted-foreground/50">•</span>
               <span className="font-mono">{cab.plateNumber}</span>
             </div>
+            <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
+              <MapPin className="w-3 h-3" /> {stage.area} · {stage.coast === 'south' ? 'South Coast' : 'North Coast'}
+            </div>
           </div>
           <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Fare</div>
-            <div className="font-bold text-primary tabular-nums">KSh {cab.currentFare}</div>
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-secondary/50 p-2 text-xs space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Positioned for arriving</span>
-            <span className="font-medium">{train.code} · ~{train.departureTime}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Drop-off zone</span>
-            <span className="font-medium">{route.name} ({route.landmark})</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Travel time</span>
-            <span className="font-medium">~{route.travelMin} min</span>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {bookingKind === 'charter' ? 'Charter' : 'Fare'}
+            </div>
+            <div className="font-bold text-primary tabular-nums">
+              KSh {bookingKind === 'charter'
+                ? Math.round(cab.baseFare * cab.capacity * 1.3).toLocaleString()
+                : fare}
+            </div>
+            {bookingKind === 'pooled' && fare < cab.baseFare && (
+              <div className="text-[10px] line-through text-muted-foreground">KSh {cab.baseFare}</div>
+            )}
           </div>
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <SeatMeter booked={cab.bookedSeats} capacity={cab.capacity} />
-          <Button
-            size="sm"
-            className="h-8"
-            disabled={full || cab.status !== 'filling'}
-            onClick={onJoin}
-          >
-            {full ? 'Full' : 'Join pool'}
-          </Button>
+          <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Car className="w-3.5 h-3.5" />
+              <span className="font-medium text-foreground">{cab.cabType}</span>
+            </div>
+            {cab.direction === 'inbound' && <LeaveCountdownBadge timing={timing} />}
+            {cab.direction === 'outbound' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Clock className="w-3 h-3" /> Arrives {train.time}
+              </span>
+            )}
+          </div>
+          <SeatMeter booked={cab.bookedSeats} capacity={cab.capacity} charterLocked={cab.charterLocked} />
         </div>
+
+        <Button
+          className="w-full h-9"
+          size="sm"
+          disabled={full || cab.status !== 'filling'}
+          onClick={onBook}
+        >
+          {full
+            ? cab.bookedSeats > 0 && bookingKind === 'charter'
+              ? 'Has pooled passengers'
+              : 'Sold out'
+            : bookingKind === 'charter'
+              ? `Book charter · KSh ${Math.round(cab.baseFare * cab.capacity * 1.3).toLocaleString()}`
+              : 'Reserve seat'}
+        </Button>
       </CardContent>
     </Card>
   );

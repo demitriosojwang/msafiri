@@ -1,8 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import type { CabStatus } from '@/lib/feeder/types';
-import { Badge } from '@/components/ui/badge';
+import type { CabStatus, BookingKind } from '@/lib/feeder/types';
 
 export function StatusBadge({ status }: { status: CabStatus }) {
   const map: Record<CabStatus, { label: string; cls: string }> = {
@@ -23,7 +22,32 @@ export function StatusBadge({ status }: { status: CabStatus }) {
   );
 }
 
-export function SeatMeter({ booked, capacity }: { booked: number; capacity: number }) {
+export function CharterBadge({ locked }: { locked: boolean }) {
+  if (!locked) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border bg-violet-100 text-violet-900 border-violet-300">
+      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+      Charter locked
+    </span>
+  );
+}
+
+export function BookingKindBadge({ kind }: { kind: BookingKind }) {
+  if (kind === 'charter') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-violet-50 text-violet-800 border-violet-200">
+        Private charter
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-emerald-50 text-emerald-800 border-emerald-200">
+      Pooled
+    </span>
+  );
+}
+
+export function SeatMeter({ booked, capacity, charterLocked }: { booked: number; capacity: number; charterLocked?: boolean }) {
   const pct = Math.min(100, Math.round((booked / capacity) * 100));
   const remaining = capacity - booked;
   return (
@@ -36,12 +60,15 @@ export function SeatMeter({ booked, capacity }: { booked: number; capacity: numb
         <div
           className={cn(
             'h-full rounded-full transition-all',
+            charterLocked ? 'bg-violet-500' :
             pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-primary',
           )}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-[10px] text-muted-foreground">{remaining} left</span>
+      <span className="text-[10px] text-muted-foreground">
+        {charterLocked ? 'charter' : `${remaining} left`}
+      </span>
     </div>
   );
 }
@@ -55,8 +82,8 @@ export function Stars({ rating }: { rating: number }) {
   );
 }
 
-export function TrainPill({ code, time, active, onClick }: {
-  code: string; time: string; active: boolean; onClick?: () => void;
+export function TrainPill({ code, time, active, onClick, direction }: {
+  code: string; time: string; active: boolean; onClick?: () => void; direction?: 'inbound' | 'outbound';
 }) {
   return (
     <button
@@ -68,8 +95,11 @@ export function TrainPill({ code, time, active, onClick }: {
           : 'bg-card hover:bg-accent border-border',
       )}
     >
-      <div className="text-[10px] uppercase tracking-wide opacity-70">{code}</div>
+      <div className="text-[10px] uppercase tracking-wide opacity-70">
+        {direction === 'outbound' ? 'Arrives' : 'Departs'}
+      </div>
       <div className="text-lg font-semibold tabular-nums leading-tight">{time}</div>
+      <div className="text-[10px] opacity-70 truncate">{code}</div>
     </button>
   );
 }

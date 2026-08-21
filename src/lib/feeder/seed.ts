@@ -1,45 +1,71 @@
-// Seed data for the SGR Feeder prototype.
-// All routes/cabs/trains reflect real Mombasa-area geography around the SGR Mombasa Terminus (Miritini).
+// Seed data for the SGR Feeder prototype (v2).
+// Reflects the actual agreed stages — existing SGR waiting/collection points used as
+// pickup/drop-off points. South Coast (Likoni, Kombani, Ukunda) + North Coast (Bamburi, Mtwapa, Malindi).
+//
+// Trains:
+//   Departures (Mombasa → Nairobi): 08:00, 15:00, 22:00  (Madaraka Express)
+//   Arrivals   (Nairobi → Mombasa): 04:00, 14:00, 20:30
 
-import type { Cab, PickupRequest, Route, Settings, Train, Booking, DriverStats } from './types';
+import type { Cab, PickupRequest, Settings, Stage, Train, Booking, DriverStats } from './types';
 
 export const SETTINGS: Settings = {
   securityBufferMin: 15,
   ticketingBufferMin: 20,
   checkInBufferMin: 10,
-  minFillThreshold: 0.7,    // 70% of seats must be booked to lock departure
-  lockCutoffMin: 30,        // lock 30 min before latestLeaveTime
+  minFillThreshold: 0.7,
+  lockCutoffMin: 30,
   nudgeDiscountPct: 10,
-  nudgeWindowMin: 60,       // within 60 min of cutoff, drop fare to fill last seats
+  nudgeWindowMin: 60,
+  // Fare model — user spec
+  baseFareStage: 450,             // KSh 450 base for stage pickup
+  offStageSurchargePerKm: 50,     // +KSh 50 per km beyond the stage
+  offStageMaxRadiusKm: 3,         // beyond 3km → "meet at nearest stage"
+  charterMultiplier: 1.3,         // charter = base × capacity × 1.3
 };
 
-// Inbound routes: pickup zones scattered around Mombasa → Mombasa Terminus (Miritini)
-// Outbound routes: from Terminus → scattered destinations (same geography, mirrored)
-export const ROUTES: Route[] = [
-  { id: 'r-jomvu',   name: 'Jomvu',   zone: 'inbound',  travelMin: 35, peakAdjustMin: 15, baseFare: 300, landmark: 'Jomvu Shopping Centre' },
-  { id: 'r-miritini',name: 'Miritini',zone: 'inbound',  travelMin: 15, peakAdjustMin: 5,  baseFare: 150, landmark: 'Miritini Junction' },
-  { id: 'r-shanzu',  name: 'Shanzu',  zone: 'inbound',  travelMin: 45, peakAdjustMin: 20, baseFare: 400, landmark: 'Shanzu Stage' },
-  { id: 'r-bamburi', name: 'Bamburi', zone: 'inbound',  travelMin: 50, peakAdjustMin: 20, baseFare: 450, landmark: 'Bamburi Mtamu' },
-  { id: 'r-nyali',   name: 'Nyali',   zone: 'inbound',  travelMin: 40, peakAdjustMin: 15, baseFare: 400, landmark: 'Nyali City Mall' },
-  { id: 'r-cbd',     name: 'CBD',     zone: 'inbound',  travelMin: 30, peakAdjustMin: 10, baseFare: 300, landmark: 'Digo Road Stage' },
+// Stages — the agreed SGR waiting/collection points.
+// South Coast (Likoni area): 3 close-together stages (coverage gap risk noted in source convo)
+// South Coast (Diani area): Kombani + Ukunda
+// North Coast: Bamburi (2 stages), Mtwapa, Malindi (TBD location)
+export const STAGES: Stage[] = [
+  // --- SOUTH COAST: Likoni cluster ---
+  { id: 's-likoni-ferry',  name: 'Likoni Ferry Container', area: 'Likoni', coast: 'south', travelMin: 35, peakAdjustMin: 15, landmark: 'Main SGR collection point, Likoni' },
+  { id: 's-fayaz',         name: 'Fayaz (Kona Mpya)',      area: 'Likoni', coast: 'south', travelMin: 38, peakAdjustMin: 15, landmark: 'Kona Mpya junction' },
+  { id: 's-shikaadabu',    name: 'ShikaAdabu (Checkpoint)', area: 'Likoni', coast: 'south', travelMin: 42, peakAdjustMin: 20, landmark: 'Checkpoint stage' },
 
-  { id: 'o-jomvu',   name: 'Jomvu',   zone: 'outbound', travelMin: 35, peakAdjustMin: 15, baseFare: 300, landmark: 'Jomvu Shopping Centre' },
-  { id: 'o-miritini',name: 'Miritini',zone: 'outbound', travelMin: 15, peakAdjustMin: 5,  baseFare: 150, landmark: 'Miritini Junction' },
-  { id: 'o-shanzu',  name: 'Shanzu',  zone: 'outbound', travelMin: 45, peakAdjustMin: 20, baseFare: 400, landmark: 'Shanzu Stage' },
-  { id: 'o-bamburi', name: 'Bamburi', zone: 'outbound', travelMin: 50, peakAdjustMin: 20, baseFare: 450, landmark: 'Bamburi Mtamu' },
-  { id: 'o-nyali',   name: 'Nyali',   zone: 'outbound', travelMin: 40, peakAdjustMin: 15, baseFare: 400, landmark: 'Nyali City Mall' },
-  { id: 'o-cbd',     name: 'CBD',     zone: 'outbound', travelMin: 30, peakAdjustMin: 10, baseFare: 300, landmark: 'Digo Road Stage' },
+  // --- SOUTH COAST: Diani cluster ---
+  { id: 's-kombani',       name: 'Kombani',                 area: 'Kombani', coast: 'south', travelMin: 50, peakAdjustMin: 20, landmark: 'Kombani junction' },
+  { id: 's-naivas-diani',  name: 'Naivas Diani',            area: 'Ukunda',  coast: 'south', travelMin: 60, peakAdjustMin: 25, landmark: 'Naivas Diani supermarket' },
+
+  // --- NORTH COAST ---
+  { id: 's-kimbeni',       name: 'Kimbeni',                 area: 'Bamburi', coast: 'north', travelMin: 45, peakAdjustMin: 20, landmark: 'Kimbeni stage, Bamburi' },
+  { id: 's-mtambo',        name: 'Mtambo',                  area: 'Bamburi', coast: 'north', travelMin: 48, peakAdjustMin: 20, landmark: 'Mtambo stage, Bamburi' },
+  { id: 's-mtwapa',        name: 'Mtwapa',                  area: 'Mtwapa',  coast: 'north', travelMin: 55, peakAdjustMin: 25, landmark: 'Mtwapa town stage' },
+
+  // North Coast stages further out — specific locations TBD by user
+  { id: 's-malindi',       name: 'Malindi',                 area: 'Malindi', coast: 'north', travelMin: 120, peakAdjustMin: 30, landmark: 'Malindi town (location TBD)' },
 ];
 
-// SGR Madaraka Express — Mombasa → Nairobi departures (real timetable, simplified)
+// Trains — Madaraka Express
 export const TRAINS: Train[] = [
-  { id: 't-1', code: 'SGR 01', departureTime: '08:00', destination: 'Nairobi', origin: 'Mombasa Terminus' },
-  { id: 't-2', code: 'SGR 03', departureTime: '15:00', destination: 'Nairobi', origin: 'Mombasa Terminus' },
-  { id: 't-3', code: 'SGR 05', departureTime: '18:00', destination: 'Nairobi', origin: 'Mombasa Terminus' },
+  // Departures (Mombasa → Nairobi) — inbound passengers catching these
+  { id: 't-dep-1', code: 'Madaraka Express', time: '08:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+  { id: 't-dep-2', code: 'Madaraka Express', time: '15:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+  { id: 't-dep-3', code: 'Madaraka Express', time: '22:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+
+  // Arrivals (Nairobi → Mombasa) — outbound passengers offboarding
+  { id: 't-arr-1', code: 'Madaraka Express', time: '04:00', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
+  { id: 't-arr-2', code: 'Madaraka Express', time: '14:00', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
+  { id: 't-arr-3', code: 'Madaraka Express', time: '20:30', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
 ];
+
+export const TRAINS_BY_DIR = {
+  inbound: TRAINS.filter(t => t.direction === 'inbound'),
+  outbound: TRAINS.filter(t => t.direction === 'outbound'),
+};
 
 // Simulated "now" — fixed for deterministic prototype.
-// Set to 13:00 so the 15:00 train is the live one (passengers booking ahead, cabs filling).
+// Set to 13:00 so the 15:00 departure + 14:00 arrival are both "live".
 export const SIM_NOW = (() => {
   const d = new Date();
   d.setHours(13, 0, 0, 0);
@@ -55,104 +81,163 @@ export function atTime(hhmm: string, dayOffset = 0): number {
   return d.getTime();
 }
 
-// Seed inbound cabs — drivers posting trips tied to specific trains
+// Seed cabs — both inbound (filling for departures) and outbound (positioned for arrivals)
 export const SEED_CABS: Cab[] = [
-  // 15:00 train (live, filling now)
-  cab('c1', 'Mwangi',  4.8, 'KDA 234X', '4-seater',  4,  'r-nyali',   't-2', 'inbound', 2, 'filling'),
-  cab('c2', 'Amani',   4.9, 'KDB 881P', '7-seater',  7,  'r-jomvu',   't-2', 'inbound', 5, 'filling'),
-  cab('c3', 'Halima',  4.7, 'KDC 552L', '14-seater', 14, 'r-bamburi', 't-2', 'inbound', 9, 'filling'),
-  cab('c4', 'Joseph',  4.6, 'KDE 119M', '11-seater', 11, 'r-cbd',     't-2', 'inbound', 6, 'filling'),
-  cab('c5', 'Fatuma',  4.9, 'KDF 770Q', '4-seater',  4,  'r-shanzu',  't-2', 'inbound', 1, 'filling'),
+  // --- INBOUND: filling for the 15:00 departure ---
+  inboundCab('c1', 'Mwangi',  4.8, 'KDA 234X', '4-seater',  4,  's-mtwapa',        't-dep-2', 2, 'filling'),
+  inboundCab('c2', 'Amani',   4.9, 'KDB 881P', '7-seater',  7,  's-likoni-ferry',  't-dep-2', 5, 'filling'),
+  inboundCab('c3', 'Halima',  4.7, 'KDC 552L', '14-seater', 14, 's-kimbeni',       't-dep-2', 9, 'filling'),
+  inboundCab('c4', 'Joseph',  4.6, 'KDE 119M', '11-seater', 11, 's-naivas-diani',  't-dep-2', 6, 'filling'),
+  inboundCab('c5', 'Fatuma',  4.9, 'KDF 770Q', '4-seater',  4,  's-malindi',       't-dep-2', 1, 'filling'),
 
-  // 18:00 train (later, pre-bookable)
-  cab('c6', 'Brian',   4.5, 'KDG 332R', '7-seater',  7,  'r-nyali',   't-3', 'inbound', 3, 'filling'),
-  cab('c7', 'Wanjiru', 4.8, 'KDH 908T', '11-seater', 11, 'r-jomvu',   't-3', 'inbound', 4, 'filling'),
-  cab('c8', 'Omar',    4.7, 'KDJ 441V', '14-seater', 14, 'r-bamburi', 't-3', 'inbound', 8, 'filling'),
+  // --- INBOUND: filling for the 22:00 departure ---
+  inboundCab('c6', 'Brian',   4.5, 'KDG 332R', '7-seater',  7,  's-mtwapa',        't-dep-3', 3, 'filling'),
+  inboundCab('c7', 'Wanjiru', 4.8, 'KDH 908T', '11-seater', 11, 's-likoni-ferry',  't-dep-3', 4, 'filling'),
+  inboundCab('c8', 'Omar',    4.7, 'KDJ 441V', '14-seater', 14, 's-kimbeni',       't-dep-3', 8, 'filling'),
+  // Empty 4-seater for the 22:00 departure — available for charter demo
+  inboundCab('c9', 'Patrick', 4.9, 'KDK 012W', '4-seater',  4,  's-naivas-diani',  't-dep-3', 0, 'filling'),
 
-  // Outbound cabs — positioned at terminus, waiting to pool arriving passengers
-  // Trains arriving at Mombasa Terminus (mirrored schedule)
-  cab('o1', 'Mwangi',  4.8, 'KDA 234X', '4-seater',  4,  'o-nyali',   't-2', 'outbound', 0, 'filling'),
-  cab('o2', 'Amani',   4.9, 'KDB 881P', '7-seater',  7,  'o-cbd',     't-2', 'outbound', 2, 'filling'),
-  cab('o3', 'Halima',  4.7, 'KDC 552L', '14-seater', 14, 'o-bamburi', 't-3', 'outbound', 5, 'filling'),
-  cab('o4', 'Joseph',  4.6, 'KDE 119M', '11-seater', 11, 'o-jomvu',   't-3', 'outbound', 3, 'filling'),
+  // --- OUTBOUND: positioned at terminus for arrivals (14:00 train) ---
+  // The driver who drove inbound to the terminus now positions to pick up arriving passengers.
+  // Coverage gap: Fayaz and ShikaAdabu (Likoni cluster) have passengers waiting but NO cab assigned.
+  outboundCab('o1', 'Mwangi',  4.8, 'KDA 234X', '4-seater',  4,  's-mtwapa',        't-arr-2', 0, 'filling'),
+  outboundCab('o2', 'Amani',   4.9, 'KDB 881P', '7-seater',  7,  's-likoni-ferry',  't-arr-2', 2, 'filling'),
+  outboundCab('o3', 'Halima',  4.7, 'KDC 552L', '14-seater', 14, 's-kimbeni',       't-arr-2', 5, 'filling'),
+  outboundCab('o4', 'Joseph',  4.6, 'KDE 119M', '11-seater', 11, 's-naivas-diani',  't-arr-2', 3, 'filling'),
+
+  // --- OUTBOUND: positioned for 20:30 arrival ---
+  outboundCab('o5', 'Brian',   4.5, 'KDG 332R', '7-seater',  7,  's-mtwapa',        't-arr-3', 0, 'filling'),
+  outboundCab('o6', 'Wanjiru', 4.8, 'KDH 908T', '11-seater', 11, 's-likoni-ferry',  't-arr-3', 2, 'filling'),
+  outboundCab('o7', 'Patrick', 4.9, 'KDK 012W', '4-seater',  4,  's-naivas-diani',  't-arr-3', 0, 'filling'),
 ];
 
-function cab(
-  id: string,
-  driverName: string,
-  driverRating: number,
-  plateNumber: string,
-  cabType: Cab['cabType'],
-  capacity: number,
-  routeId: string,
-  trainId: string,
-  direction: 'inbound' | 'outbound',
-  bookedSeats: number,
-  status: Cab['status'],
+function inboundCab(
+  id: string, driverName: string, driverRating: number, plateNumber: string,
+  cabType: Cab['cabType'], capacity: number, stageId: string, trainId: string,
+  bookedSeats: number, status: Cab['status'],
 ): Cab {
-  const route = ROUTES.find(r => r.id === routeId)!;
   return {
     id, driverName, driverRating, plateNumber, cabType, capacity,
-    routeId, trainId, direction, bookedSeats, status,
-    baseFare: route.baseFare,
-    currentFare: route.baseFare,
+    stageId, trainId, direction: 'inbound', bookedSeats, status,
+    baseFare: SETTINGS.baseFareStage,
+    currentFare: SETTINGS.baseFareStage,
+    charterLocked: false,
   };
 }
 
-export const SEED_REQUESTS: PickupRequest[] = [
-  {
-    id: 'rq1',
-    passengerName: 'Grace W.',
-    pickupPoint: 'Nyali City Mall',
-    destinationZoneId: undefined,
-    seatsRequested: 1,
-    trainId: 't-2',
-    hasTicket: true,
-    direction: 'inbound',
-    createdAt: SIM_NOW - 1000 * 60 * 5,
-    status: 'pending',
-  },
-  {
-    id: 'rq2',
-    passengerName: 'Said A.',
-    pickupPoint: 'Bamburi Mtamu',
-    seatsRequested: 2,
-    trainId: 't-2',
-    hasTicket: false,
-    direction: 'inbound',
-    createdAt: SIM_NOW - 1000 * 60 * 3,
-    status: 'pending',
-  },
-  {
-    id: 'rq3',
-    passengerName: 'Mercy K.',
-    pickupPoint: 'Jomvu Shopping Centre',
-    seatsRequested: 1,
-    trainId: 't-3',
-    hasTicket: true,
-    direction: 'inbound',
-    createdAt: SIM_NOW - 1000 * 60 * 8,
-    status: 'pending',
-  },
-];
-
-export const SEED_BOOKINGS: Booking[] = [
-  // Reflects the bookedSeats counts in SEED_CABS — pre-existing reservations
-  booking('b1', 'c1', 'Passenger A', 'Nyali City Mall', true,  'inbound'),
-  booking('b2', 'c1', 'Passenger B', 'Nyali City Mall', false, 'inbound'),
-  booking('b3', 'c2', 'Passenger C', 'Jomvu Stage',     true,  'inbound'),
-  booking('b4', 'c2', 'Passenger D', 'Jomvu Stage',     true,  'inbound'),
-  booking('b5', 'c2', 'Passenger E', 'Jomvu Stage',     false, 'inbound'),
-  booking('b6', 'c2', 'Passenger F', 'Jomvu Stage',     true,  'inbound'),
-  booking('b7', 'c2', 'Passenger G', 'Jomvu Stage',     true,  'inbound'),
-  booking('b8', 'c3', 'Passenger H', 'Bamburi Mtamu',   false, 'inbound'),
-  booking('b9', 'c4', 'Passenger I', 'Digo Road',       true,  'inbound'),
-];
-
-function booking(id: string, cabId: string, passengerName: string, pickupPoint: string, hasTicket: boolean, direction: 'inbound' | 'outbound'): Booking {
+function outboundCab(
+  id: string, driverName: string, driverRating: number, plateNumber: string,
+  cabType: Cab['cabType'], capacity: number, stageId: string, trainId: string,
+  bookedSeats: number, status: Cab['status'],
+): Cab {
   return {
-    id, cabId, passengerName, pickupPoint, hasTicket, direction,
-    status: 'reserved', createdAt: SIM_NOW - 1000 * 60 * 30,
+    id, driverName, driverRating, plateNumber, cabType, capacity,
+    stageId, trainId, direction: 'outbound', bookedSeats, status,
+    baseFare: SETTINGS.baseFareStage,
+    currentFare: SETTINGS.baseFareStage,
+    charterLocked: false,
+  };
+}
+
+// Seed requests — including charter requests for the driver-side demo
+export const SEED_REQUESTS: PickupRequest[] = [
+  // Inbound pooled requests
+  {
+    id: 'rq1', passengerName: 'Grace W.',
+    pickupPoint: 'Mtwapa town stage', pickupKind: 'stage', stageId: 's-mtwapa',
+    seatsRequested: 1, trainId: 't-dep-2', hasTicket: true, direction: 'inbound',
+    kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 5, status: 'pending',
+  },
+  {
+    id: 'rq2', passengerName: 'Said A.',
+    pickupPoint: 'Kimbeni stage', pickupKind: 'stage', stageId: 's-kimbeni',
+    seatsRequested: 2, trainId: 't-dep-2', hasTicket: false, direction: 'inbound',
+    kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 3, status: 'pending',
+  },
+  // Inbound charter request — family booking whole 4-seater for 22:00 train
+  {
+    id: 'rq3', passengerName: 'The Khan Family',
+    pickupPoint: 'Naivas Diani', pickupKind: 'stage', stageId: 's-naivas-diani',
+    seatsRequested: 4, trainId: 't-dep-3', hasTicket: true, direction: 'inbound',
+    kind: 'charter', createdAt: SIM_NOW - 1000 * 60 * 8, status: 'pending',
+  },
+  // Outbound pooled requests — arriving passengers
+  {
+    id: 'rq4', passengerName: 'Mercy K.',
+    pickupPoint: 'Likoni Ferry Container', pickupKind: 'stage', stageId: 's-likoni-ferry',
+    seatsRequested: 1, trainId: 't-arr-2', hasTicket: false, direction: 'outbound',
+    kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 10, status: 'pending',
+  },
+  // Off-stage request (with distance surcharge)
+  {
+    id: 'rq5', passengerName: 'Brian O.',
+    pickupPoint: 'Near Tuskys Bamburi', pickupKind: 'off-stage', stageId: 's-kimbeni',
+    offStageDistanceKm: 2.4, seatsRequested: 1, trainId: 't-arr-2', hasTicket: true,
+    direction: 'outbound', kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 6, status: 'pending',
+  },
+  // Outbound charter — private pickup for 20:30 arrival
+  {
+    id: 'rq6', passengerName: 'Mr. Patel',
+    pickupPoint: 'Mtwapa town stage', pickupKind: 'stage', stageId: 's-mtwapa',
+    seatsRequested: 7, trainId: 't-arr-3', hasTicket: true, direction: 'outbound',
+    kind: 'charter', createdAt: SIM_NOW - 1000 * 60 * 12, status: 'pending',
+  },
+  // Coverage gap demonstration — Fayaz and ShikaAdabu have waiting passengers but no cab
+  {
+    id: 'rq7', passengerName: 'Hawa A.',
+    pickupPoint: 'Fayaz (Kona Mpya)', pickupKind: 'stage', stageId: 's-fayaz',
+    seatsRequested: 1, trainId: 't-arr-2', hasTicket: false, direction: 'outbound',
+    kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 9, status: 'pending',
+  },
+  {
+    id: 'rq8', passengerName: 'Ali M.',
+    pickupPoint: 'ShikaAdabu (Checkpoint)', pickupKind: 'stage', stageId: 's-shikaadabu',
+    seatsRequested: 2, trainId: 't-arr-2', hasTicket: true, direction: 'outbound',
+    kind: 'pooled', createdAt: SIM_NOW - 1000 * 60 * 7, status: 'pending',
+  },
+];
+
+// Seed bookings — pre-existing reservations reflecting the bookedSeats counts
+export const SEED_BOOKINGS: Booking[] = [
+  // Inbound for 15:00 (c1-c5)
+  booking('b1', 'c1', 'Passenger A', 'Mtwapa town stage', 'stage', 's-mtwapa', undefined, true,  'inbound', 'pooled', 1, 450),
+  booking('b2', 'c1', 'Passenger B', 'Mtwapa town stage', 'stage', 's-mtwapa', undefined, false, 'inbound', 'pooled', 1, 450),
+  booking('b3', 'c2', 'Passenger C', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true,  'inbound', 'pooled', 1, 450),
+  booking('b4', 'c2', 'Passenger D', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true,  'inbound', 'pooled', 1, 450),
+  booking('b5', 'c2', 'Passenger E', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, false, 'inbound', 'pooled', 1, 450),
+  booking('b6', 'c2', 'Passenger F', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true,  'inbound', 'pooled', 1, 450),
+  booking('b7', 'c2', 'Passenger G', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true,  'inbound', 'pooled', 1, 450),
+  booking('b8', 'c3', 'Passenger H', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, false, 'inbound', 'pooled', 1, 450),
+  booking('b9', 'c4', 'Passenger I', 'Naivas Diani', 'stage', 's-naivas-diani', undefined, true, 'inbound', 'pooled', 1, 450),
+
+  // Outbound for 14:00 arrival (o2-o4) — pre-existing pooled
+  booking('b10', 'o2', 'Passenger J', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, false, 'outbound', 'pooled', 1, 450),
+  booking('b11', 'o2', 'Passenger K', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b12', 'o3', 'Passenger L', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b13', 'o3', 'Passenger M', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, false, 'outbound', 'pooled', 1, 450),
+  booking('b14', 'o3', 'Passenger N', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b15', 'o3', 'Passenger O', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, false, 'outbound', 'pooled', 1, 450),
+  booking('b16', 'o3', 'Passenger P', 'Kimbeni stage', 'stage', 's-kimbeni', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b17', 'o4', 'Passenger Q', 'Naivas Diani', 'stage', 's-naivas-diani', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b18', 'o4', 'Passenger R', 'Naivas Diani', 'stage', 's-naivas-diani', undefined, true,  'outbound', 'pooled', 1, 450),
+  booking('b19', 'o4', 'Passenger S', 'Naivas Diani', 'stage', 's-naivas-diani', undefined, false, 'outbound', 'pooled', 1, 450),
+
+  // Outbound for 20:30 arrival (o5-o6)
+  booking('b20', 'o6', 'Passenger T', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true, 'outbound', 'pooled', 1, 450),
+  booking('b21', 'o6', 'Passenger U', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, false, 'outbound', 'pooled', 1, 450),
+];
+
+function booking(
+  id: string, cabId: string, passengerName: string, pickupPoint: string,
+  pickupKind: 'stage' | 'off-stage', stageId: string | undefined,
+  offStageDistanceKm: number | undefined, hasTicket: boolean, direction: 'inbound' | 'outbound',
+  kind: 'pooled' | 'charter', seatsReserved: number, farePaid: number,
+): Booking {
+  return {
+    id, cabId, passengerName, pickupPoint, pickupKind, stageId,
+    offStageDistanceKm, hasTicket, direction, status: 'reserved',
+    kind, seatsReserved, farePaid,
+    createdAt: SIM_NOW - 1000 * 60 * 30,
   };
 }
 
@@ -161,8 +246,9 @@ export const DRIVER_STATS: DriverStats = {
   tripsCompleted: 2,
   seatsFilled: 9,
   seatsOffered: 11,
+  chartersCompleted: 0,
   rating: 4.8,
 };
 
-// Logged-in driver perspective — Mwangi (drives c1 inbound + o1 outbound)
-export const ACTIVE_DRIVER_ID = 'c1';
+// Logged-in driver perspective — Patrick (drives c9 inbound — empty 4-seater available for charter demo)
+export const ACTIVE_DRIVER_ID = 'c9';

@@ -34,3 +34,89 @@ Stage Summary:
 - Inbound + outbound flows both work.
 - Files: `src/lib/feeder/{types,seed,calc}.ts`, `src/store/feeder-store.ts`, `src/components/feeder/{FeederApp,PassengerView,DriverView,BookingSheet,TripTiming,Shared}.tsx`.
 - Screenshots saved to `/home/z/my-project/download/sgr-feeder-{passenger,driver,about,desktop}.png`.
+
+---
+Task ID: 2
+Agent: main
+Task: Add admin panel, real stages, distance-based fares, and private charter feature.
+
+Work Log:
+- Read user's expanded requirements: (1) admin arrival monitoring, (2) real SGR stages as pickup/drop-off points, (3) base KSh 450 + distance surcharge, (4) private charter feature.
+- Redesigned data model in `src/lib/feeder/types.ts`:
+  • Replaced "Route" with "Stage" (id, name, area, coast, travelMin, peakAdjustMin, landmark)
+  • Added `BookingKind` ('pooled' | 'charter'), `PickupKind` ('stage' | 'off-stage')
+  • Extended Booking with pickupKind, stageId, offStageDistanceKm, kind, seatsReserved, farePaid
+  • Extended Cab with charterLocked flag
+  • Extended Settings with baseFareStage (450), offStageSurchargePerKm (50), offStageMaxRadiusKm (3), charterMultiplier (1.3)
+  • Added FareBreakdown type for transparent fare display
+- Updated seed (`src/lib/feeder/seed.ts`) with real Mombasa geography:
+  • 9 stages across South Coast (Likoni Ferry Container, Fayaz, ShikaAdabu, Kombani, Naivas Diani) and North Coast (Kimbeni, Mtambo, Mtwapa, Malindi)
+  • 3 departure trains (08:00, 15:00, 22:00) + 3 arrival trains (04:00, 14:00, 20:30) per user spec
+  • Seed cabs positioned at real stages for both directions
+  • Seed requests include charter requests (Khan Family, Mr. Patel) and off-stage request (Brian O. 2.4km from Kimbeni)
+  • Seed bookings tagged with stageId and farePaid for revenue tracking
+  • Coverage gap seed: Fayaz and ShikaAdabu have waiting passengers but no cab assigned (demonstrates the admin alert)
+  • Added Patrick (c9) as active driver with empty 4-seater for 22:00 train — enables charter demo flow
+- Updated calculator (`src/lib/feeder/calc.ts`):
+  • `computeFare()` — full fare breakdown: base + surcharge (capped) + charter premium
+  • `canDriverAcceptCharter()` — returns false if cab has any active pooled bookings (per user's design decision: "I'd lean toward simply not surfacing charter requests to drivers who already have active pooled bookings")
+  • Updated `shouldAutoLock` to honor charter lock
+  • Updated `nudgeFare` to skip nudging for charter-locked cabs
+- Updated store (`src/store/feeder-store.ts`):
+  • Added Role type with 'admin' option
+  • Added bookCharter action — locks cab, sets bookedSeats = capacity
+  • Added acceptCharterRequest action with same lockout behavior
+  • cancelBooking now resets charterLocked when cancelling a charter
+  • getCharterRequestsForDriver — only returns charter requests if cab is empty (per design rule)
+  • getRequestsForDriver — returns empty when cab is charter-locked
+  • assignCabToStage — for admin to redistribute cabs
+- Rebuilt Passenger view (`PassengerView.tsx`):
+  • Train picker for both directions (departures 08/15/22, arrivals 04/14/20:30)
+  • Stage picker grouped by area, with South/North coast badges and waiting passenger counts
+  • Pickup options card: "At stage" / "Off-stage" toggle + distance slider (0-5km) with 3km cap warning
+  • Charter toggle ("Book the whole vehicle") — grays out off-stage option when active
+  • Live fare preview showing breakdown: base + surcharge + per seat + (charter premium if applicable) + total
+  • Cab cards show charter price when charter mode is active; cabs with pooled passengers show "Has pooled passengers" (disabled)
+- Rebuilt Driver view (`DriverView.tsx`):
+  • Stats include chartersCompleted counter
+  • Charter requests section — ONLY visible if driver has no active pooled bookings
+  • Charter request card shows full payout breakdown (base × capacity + premium)
+  • Charter confirmation sheet with explicit warning: "Accepting locks your cab — pooled requests will be hidden"
+  • Charter lockout notice: "Charter lockout active — Pooled pickup requests are hidden from your queue"
+  • Manifest shows charter bookings with crown icon and violet styling
+  • Pooled requests section shows "0 (charter locked)" with lockout message when cab is charter-locked
+- Built Admin view (`AdminView.tsx`) — the core arrival monitoring panel:
+  • 4 metrics cards: Active cabs, Revenue today, Pending requests, Coverage gaps
+  • Top alert banner when coverage gaps exist (red, lists affected stages)
+  • 4 tabs: Arrivals, Departs, Stages, Charters
+  • Arrivals tab: per arriving train, stage-by-stage breakdown showing cabs positioned, seats booked, waiting passengers, "No cab" gap badges, charter badges, live activity feed
+  • Departs tab: per departing train, cab fill status with threshold progress bars
+  • Stages tab: full coverage map with all 9 stages, inbound/outbound cab counts per stage
+  • Charters tab: all charter bookings with payouts + pending charter requests awaiting driver match
+- Updated `FeederApp.tsx`:
+  • 3-role switcher (Passenger / Driver / Admin) with Shield icon for admin
+  • About sheet updated with full feature documentation
+- Ran ESLint — clean.
+- Used agent-browser to verify end-to-end on iPhone 14:
+  • Passenger view: stages render with area groupings, South/North coast badges, waiting counts
+  • Charter toggle grays out off-stage option, shows charter breakdown (Base × 4 = 1800, +30% premium = 540, Total = 2340)
+  • Off-stage slider at 2.4km: surcharge = +KSh 120, per seat = KSh 570 ✓
+  • Off-stage slider past 3km cap (4.2km): surcharge capped at +KSh 150, warning "please meet at nearest stage" ✓
+  • Driver view (Patrick, empty cab): "Charter requests · 1 pending" visible, "No passengers yet"
+  • Click Accept on charter → Confirm sheet opens with full payout breakdown
+  • Click Confirm → "Charter accepted — Cab locked for private booking. Pooled requests hidden."
+  • After charter: "Charter lockout active" notice, pooled requests hidden, "Start charter trip · 4 seats" enabled
+  • Admin view: 4 metric cards render, coverage gap alert shows Fayaz & ShikaAdabu with passenger counts
+  • Admin Arrivals tab: 3 arrival trains (04:00, 14:00, 20:30), stage-by-stage breakdown with No Cab badges
+  • Admin Stages tab: all 9 stages with per-stage stats (inbound cabs, outbound cabs, booked pax, waiting)
+  • Admin Charters tab: Khan Family + Mr. Patel pending charter requests visible
+  • No console errors, no runtime errors
+
+Stage Summary:
+- Full 3-role app: Passenger, Driver, Admin — all interactive and verified.
+- Real Mombasa stages (Likoni cluster, Kombani, Ukunda, Bamburi, Mtwapa, Malindi) replace the abstract "routes" concept.
+- Base fare KSh 450 + KSh 50/km distance surcharge (capped at 3km) — live in the UI.
+- Private charter feature: KSh 450 × capacity × 1.3x multiplier, with full charter acceptance flow and pooled lockout.
+- Admin panel surfaces coverage gaps (Fayaz & ShikaAdabu — passengers waiting, no cab) and provides stage-by-stage arrival monitoring.
+- Files modified: `src/lib/feeder/{types,seed,calc}.ts`, `src/store/feeder-store.ts`, `src/components/feeder/{FeederApp,PassengerView,DriverView,BookingSheet,Shared,AdminView}.tsx`.
+- Screenshots saved to `/home/z/my-project/download/sgr-feeder-{passenger-v2,driver-charter,admin-arrivals,admin-stages}.png`.

@@ -1,13 +1,11 @@
-// Core timing logic — reverse-engineered "latest leave time" from train departure.
+// Core logic — timing + fare calculation.
 //
-// The fundamental insight (from the source conversation):
-//   A cab cannot leave until it's full, but "full" depends on strangers showing up
-//   at a stage in real time. That unpredictability eats into the buffer passengers
-//   need for check-in / ticketing / security. The app converts physical waiting into
-//   digital fill-up done ahead of time, with the latest-leave-time reverse-engineered
-//   from the train's departure.
+// Two distinct calculations:
+//   1. INBOUND trip timing: reverse-engineered "latest leave time" from train departure.
+//      (Same as v1 — for passengers heading TO the terminus to catch a departing train.)
+//   2. FARE model: base KSh 450 (stage) + distance surcharge (off-stage) + charter premium.
 
-import type { Cab, Route, Settings, Train, TripTiming, Booking } from './types';
+import type { Cab, Settings, Stage, Train, TripTiming, Booking, FareBreakdown, PickupKind, BookingKind } from './types';
 import { atTime, SIM_NOW } from './seed';
 
 const PEAK_HOURS = [
@@ -21,14 +19,12 @@ function isPeakHour(epochMs: number): boolean {
   return PEAK_HOURS.some(p => h >= p.start && h < p.end);
 }
 
-// Travel time from pickup route to terminus, adjusted for time-of-day.
-export function travelTimeFor(route: Route, leaveAtMs: number): number {
-  return route.travelMin + (isPeakHour(leaveAtMs) ? route.peakAdjustMin : 0);
+// Travel time from stage to terminus, peak-adjusted
+export function travelTimeFor(stage: Stage, leaveAtMs: number): number {
+  return stage.travelMin + (isPeakHour(leaveAtMs) ? stage.peakAdjustMin : 0);
 }
 
 // Per-passenger total buffer (security + check-in + optional ticketing)
-// If the passenger already has an e-ticket, the ticketing buffer is skipped —
-// they can leave later and still catch the same train.
 export function bufferFor(settings: Settings, hasTicket: boolean): {
   security: number; ticketing: number; checkIn: number; total: number;
 } {
@@ -40,32 +36,21 @@ export function bufferFor(settings: Settings, hasTicket: boolean): {
   };
 }
 
-// THE CORE FUNCTION — given a train + route + passenger ticket status, compute
-// the latest time the cab can leave the pickup point and still get the passenger
-// to the train on time.
-//
-//   latestLeave = trainDeparture
-//                   - securityBuffer
-//                   - (hasTicket ? 0 : ticketingBuffer)
-//                   - checkInBuffer
-//                   - travelTime(route, latestLeave)  ← feedback loop, peak-adjusted
-//
-// We approximate the feedback loop by computing travel time at the candidate leave time.
+// THE CORE INBOUND FUNCTION — given a train + stage + passenger ticket status, compute
+// the latest time the cab can leave the stage and still get passengers to the train on time.
 export function computeTripTiming(
   cab: Cab,
-  route: Route,
+  stage: Stage,
   train: Train,
   settings: Settings,
   hasTicket = false,
   now = SIM_NOW,
 ): TripTiming {
-  const departureMs = atTime(train.departureTime);
+  const departureMs = atTime(train.time);
   const buffer = bufferFor(settings, hasTicket);
 
-  // First pass: assume off-peak to get a candidate leave time
-  let candidateLeave = departureMs - (buffer.total + route.travelMin) * 60 * 1000;
-  // Refine: recompute travel time at the candidate leave time (peak-adjusted)
-  const travelMin = travelTimeFor(route, candidateLeave);
+  let candidateLeave = departureMs - (buffer.total + stage.travelMin) * 60 * 1000;
+  const travelMin = travelTimeFor(stage, candidateLeave);
   candidateLeave = departureMs - (buffer.total + travelMin) * 60 * 1000;
 
   const cutoffMs = candidateLeave - settings.lockCutoffMin * 60 * 1000;
@@ -75,13 +60,14 @@ export function computeTripTiming(
   const shouldNudge =
     now >= nudgeStartMs &&
     now < cutoffMs &&
-    fillPct < settings.minFillThreshold;
+    fillPct < settings.minFillThreshold &&
+    !cab.charterLocked;
 
   const minutesUntilCutoff = Math.round((cutoffMs - now) / 60 / 1000);
   const minutesUntilLeave = Math.round((candidateLeave - now) / 60 / 1000);
 
   return {
-    trainDeparture: train.departureTime,
+    trainDeparture: train.time,
     latestLeaveTime: fmtTime(candidateLeave),
     travelMin,
     securityMin: buffer.security,
@@ -119,12 +105,15 @@ export function fmtCountdown(min: number): string {
   return `in ${fmtDuration(min)}`;
 }
 
-// Decide if a cab should auto-lock based on threshold + cutoff proximity
+// Auto-lock decision based on threshold + cutoff proximity
 export function shouldAutoLock(cab: Cab, timing: TripTiming, settings: Settings): {
   locked: boolean; reason: string;
 } {
   if (cab.status === 'locked' || cab.status === 'departed' || cab.status === 'arrived') {
     return { locked: false, reason: 'already past this stage' };
+  }
+  if (cab.charterLocked) {
+    return { locked: true, reason: 'Charter locked — driver committed to private booking' };
   }
   if (timing.fillPct >= settings.minFillThreshold && timing.minutesUntilCutoff <= 0) {
     return { locked: true, reason: `Threshold met (${Math.round(timing.fillPct * 100)}%) and cutoff reached` };
@@ -135,20 +124,95 @@ export function shouldAutoLock(cab: Cab, timing: TripTiming, settings: Settings)
   return { locked: false, reason: '' };
 }
 
-// Apply fare nudge if in nudge window
+// Apply fare nudge if in nudge window (pooled only — charters don't nudge)
 export function nudgeFare(cab: Cab, timing: TripTiming, settings: Settings): number {
-  if (timing.shouldNudge) {
+  if (timing.shouldNudge && !cab.charterLocked) {
     return Math.round(cab.baseFare * (1 - settings.nudgeDiscountPct / 100));
   }
   return cab.baseFare;
 }
 
-// Compute outbound pooling — group arriving passengers by destination zone
+// ===================== FARE MODEL =====================
+//
+// Per the user spec:
+//   - Base fare: KSh 450 (stage pickup, per seat, pooled)
+//   - Off-stage: +KSh 50/km beyond the stage, capped at 3km
+//     (beyond 3km → "please meet at nearest stage")
+//   - Charter: book whole vehicle = base × capacity × 1.3 multiplier
+//     (charter pays for all seats + small privacy premium)
+
+export function computeFare(params: {
+  settings: Settings;
+  pickupKind: PickupKind;
+  offStageDistanceKm?: number;
+  kind: BookingKind;
+  capacity: number;
+}): FareBreakdown {
+  const { settings, pickupKind, offStageDistanceKm, kind, capacity } = params;
+  const base = settings.baseFareStage;
+
+  // Distance surcharge (off-stage only)
+  let surcharge = 0;
+  let capped = false;
+  if (pickupKind === 'off-stage') {
+    const km = offStageDistanceKm ?? 0;
+    if (km > settings.offStageMaxRadiusKm) {
+      capped = true;
+      surcharge = settings.offStageSurchargePerKm * settings.offStageMaxRadiusKm;
+    } else {
+      surcharge = Math.round(settings.offStageSurchargePerKm * km);
+    }
+  }
+
+  const perSeat = base + surcharge;
+  const seats = kind === 'charter' ? capacity : 1;
+  const subtotal = perSeat * seats;
+  const charterPremium = kind === 'charter'
+    ? Math.round(subtotal * (settings.charterMultiplier - 1))
+    : 0;
+  const total = subtotal + charterPremium;
+
+  return {
+    base,
+    surcharge,
+    perSeat,
+    seats,
+    subtotal,
+    charterPremium,
+    total,
+    capped,
+  };
+}
+
+// Charter visibility rule — driver should NOT see charter requests
+// if they already have active pooled bookings (per user's design decision).
+export function canDriverAcceptCharter(cab: Cab, bookings: Booking[]): {
+  allowed: boolean; reason: string;
+} {
+  if (cab.charterLocked) {
+    return { allowed: false, reason: 'Already committed to a charter' };
+  }
+  if (cab.status !== 'filling') {
+    return { allowed: false, reason: `Cab is ${cab.status}` };
+  }
+  const activePooled = bookings.filter(
+    b => b.cabId === cab.id && b.status !== 'cancelled' && b.kind === 'pooled',
+  );
+  if (activePooled.length > 0) {
+    return {
+      allowed: false,
+      reason: `Already has ${activePooled.length} pooled passenger${activePooled.length > 1 ? 's' : ''} — reassigning them would break trust`,
+    };
+  }
+  return { allowed: true, reason: '' };
+}
+
+// Compute outbound pooling — group arriving passengers by destination stage
 export function poolOutboundPassengers(bookings: Booking[]): Map<string, Booking[]> {
   const pools = new Map<string, Booking[]>();
   for (const b of bookings) {
     if (b.direction !== 'outbound' || b.status === 'cancelled') continue;
-    const zone = b.destinationZoneId || 'unknown';
+    const zone = b.stageId || 'unknown';
     if (!pools.has(zone)) pools.set(zone, []);
     pools.get(zone)!.push(b);
   }

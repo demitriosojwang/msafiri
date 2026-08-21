@@ -14,13 +14,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { ROUTES, TRAINS } from '@/lib/feeder/seed';
-import { computeTripTiming, fmtDuration, fmtCountdown } from '@/lib/feeder/calc';
+import { STAGES, TRAINS } from '@/lib/feeder/seed';
+import { computeTripTiming, computeFare } from '@/lib/feeder/calc';
 import type { Cab } from '@/lib/feeder/types';
 import { useFeederStore } from '@/store/feeder-store';
 import { TripTimingTimeline } from './TripTiming';
-import { SeatMeter, Stars, StatusBadge } from './Shared';
-import { MapPin, User, Ticket as TicketIcon, CheckCircle2 } from 'lucide-react';
+import { SeatMeter, Stars, StatusBadge, CharterBadge } from './Shared';
+import { MapPin, User, Ticket as TicketIcon, CheckCircle2, Crown, Car } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -32,28 +32,46 @@ export function BookingSheet({ cab, open, onOpenChange }: {
   const [hasTicket, setHasTicket] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const settings = useFeederStore(s => s.settings);
+  const pickupKind = useFeederStore(s => s.pickupKind);
+  const offStageDistanceKm = useFeederStore(s => s.offStageDistanceKm);
+  const bookingKind = useFeederStore(s => s.bookingKind);
   const bookSeat = useFeederStore(s => s.bookSeat);
+  const bookCharter = useFeederStore(s => s.bookCharter);
   const { toast } = useToast();
 
   if (!cab) return null;
 
-  const route = ROUTES.find(r => r.id === cab.routeId);
+  const stage = STAGES.find(s => s.id === cab.stageId);
   const train = TRAINS.find(t => t.id === cab.trainId);
-  if (!route || !train) return null;
+  if (!stage || !train) return null;
 
-  const timing = computeTripTiming(cab, route, train, settings, hasTicket);
-  const fare = cab.currentFare;
+  const timing = computeTripTiming(cab, stage, train, settings, hasTicket);
+  const isCharter = bookingKind === 'charter';
+
+  const fare = computeFare({
+    settings,
+    pickupKind,
+    offStageDistanceKm: pickupKind === 'off-stage' ? offStageDistanceKm : undefined,
+    kind: bookingKind,
+    capacity: cab.capacity,
+  });
+
   const full = cab.bookedSeats >= cab.capacity;
-  const canBook = name.trim().length > 1 && pickup.trim().length > 1 && !full;
+  const charterBlocked = isCharter && cab.bookedSeats > 0;
+  const canBook = name.trim().length > 1 && pickup.trim().length > 1 && !full && !charterBlocked;
 
   function handleBook() {
     if (!cab) return;
-    const id = bookSeat(cab.id, name.trim(), pickup.trim(), hasTicket);
+    const id = isCharter
+      ? bookCharter(cab.id, name.trim(), pickup.trim(), hasTicket)
+      : bookSeat(cab.id, name.trim(), pickup.trim(), hasTicket);
     if (id) {
       setConfirmed(true);
       toast({
-        title: 'Seat reserved',
-        description: `You're on ${cab.driverName}'s ${cab.cabType}. Leave by ${timing.latestLeaveTime}.`,
+        title: isCharter ? 'Charter reserved' : 'Seat reserved',
+        description: isCharter
+          ? `Whole ${cab.cabType} reserved for ${cab.driverName}. Leave by ${timing.latestLeaveTime}.`
+          : `You're on ${cab.driverName}'s ${cab.cabType}. Leave by ${timing.latestLeaveTime}.`,
       });
     }
   }
@@ -61,7 +79,6 @@ export function BookingSheet({ cab, open, onOpenChange }: {
   function handleClose(v: boolean) {
     onOpenChange(v);
     if (!v) {
-      // Reset after sheet closes
       setTimeout(() => {
         setName(''); setPickup(''); setHasTicket(false); setConfirmed(false);
       }, 200);
@@ -77,8 +94,13 @@ export function BookingSheet({ cab, open, onOpenChange }: {
         <SheetHeader>
           <div className="flex items-start justify-between gap-2">
             <div>
-              <SheetTitle className="text-xl">
+              <SheetTitle className="text-xl flex items-center gap-2">
                 {cab.driverName}'s {cab.cabType}
+                {isCharter && (
+                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-900">
+                    <Crown className="w-3 h-3" /> Private charter
+                  </span>
+                )}
               </SheetTitle>
               <SheetDescription className="flex items-center gap-2 mt-1">
                 <Stars rating={cab.driverRating} />
@@ -86,12 +108,22 @@ export function BookingSheet({ cab, open, onOpenChange }: {
                 <span className="font-mono text-xs">{cab.plateNumber}</span>
                 <span className="text-muted-foreground/50">•</span>
                 <StatusBadge status={cab.status} />
+                {cab.charterLocked && <CharterBadge locked />}
               </SheetDescription>
             </div>
             <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Fare</div>
-              <div className="text-2xl font-bold tabular-nums text-primary">KSh {fare}</div>
-              {cab.currentFare < cab.baseFare && (
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {isCharter ? 'Total fare' : 'Fare'}
+              </div>
+              <div className="text-2xl font-bold tabular-nums text-primary">
+                KSh {fare.total.toLocaleString()}
+              </div>
+              {isCharter && (
+                <div className="text-[10px] text-muted-foreground">
+                  {fare.seats} seats × KSh {fare.perSeat} + KSh {fare.charterPremium}
+                </div>
+              )}
+              {!isCharter && cab.currentFare < cab.baseFare && (
                 <div className="text-[10px] line-through text-muted-foreground">KSh {cab.baseFare}</div>
               )}
             </div>
@@ -101,14 +133,19 @@ export function BookingSheet({ cab, open, onOpenChange }: {
         {confirmed ? (
           <div className="px-4 py-6 space-y-4">
             <div className="flex flex-col items-center text-center gap-2 py-4">
-              <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
-                <CheckCircle2 className="w-7 h-7 text-emerald-600" />
+              <div className={cn(
+                'w-12 h-12 rounded-full flex items-center justify-center',
+                isCharter ? 'bg-violet-100' : 'bg-emerald-100',
+              )}>
+                <CheckCircle2 className={cn('w-7 h-7', isCharter ? 'text-violet-600' : 'text-emerald-600')} />
               </div>
-              <h3 className="text-lg font-semibold">Seat reserved!</h3>
+              <h3 className="text-lg font-semibold">
+                {isCharter ? 'Charter reserved!' : 'Seat reserved!'}
+              </h3>
               <p className="text-sm text-muted-foreground max-w-xs">
-                Be at <span className="font-medium text-foreground">{pickup || route.landmark}</span> by{' '}
+                Be at <span className="font-medium text-foreground">{pickup || stage.name}</span> by{' '}
                 <span className="font-medium text-foreground">{timing.latestLeaveTime}</span>.
-                Driver will be notified.
+                {isCharter && ' Driver has been notified and will skip other pooling.'}
               </p>
             </div>
             <TripTimingTimeline timing={timing} hasTicket={hasTicket} />
@@ -120,27 +157,67 @@ export function BookingSheet({ cab, open, onOpenChange }: {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="rounded-lg bg-secondary/60 p-3">
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground mb-1">
-                  <MapPin className="w-3 h-3" /> Pickup
+                  <MapPin className="w-3 h-3" /> {pickupKind === 'stage' ? 'Stage' : 'Pickup near'}
                 </div>
-                <div className="font-medium">{route.name}</div>
-                <div className="text-xs text-muted-foreground">{route.landmark}</div>
+                <div className="font-medium">{stage.name}</div>
+                <div className="text-xs text-muted-foreground">{stage.area} · {stage.coast === 'south' ? 'South' : 'North'} Coast</div>
               </div>
               <div className="rounded-lg bg-secondary/60 p-3">
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground mb-1">
                   <TicketIcon className="w-3 h-3" /> Train
                 </div>
                 <div className="font-medium">{train.code}</div>
-                <div className="text-xs text-muted-foreground">Departs {train.departureTime}</div>
+                <div className="text-xs text-muted-foreground">
+                  {cab.direction === 'inbound' ? 'Departs' : 'Arrives'} {train.time}
+                </div>
               </div>
             </div>
 
-            {/* The core mechanic — reverse-engineered leave time */}
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
-                How this cab's leave time is computed
+            {/* The core mechanic — reverse-engineered leave time (inbound only) */}
+            {cab.direction === 'inbound' && (
+              <div className="rounded-xl border bg-card p-3">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+                  How this cab's leave time is computed
+                </div>
+                <TripTimingTimeline timing={timing} hasTicket={hasTicket} />
               </div>
-              <TripTimingTimeline timing={timing} hasTicket={hasTicket} />
-            </div>
+            )}
+
+            {cab.direction === 'outbound' && (
+              <div className="rounded-lg bg-secondary/60 p-3 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Train arrives</span>
+                  <span className="font-medium">{train.time}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Travel time to {stage.name}</span>
+                  <span className="font-medium">~{stage.travelMin} min</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Drop-off</span>
+                  <span className="font-medium">{stage.name}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Fare breakdown for charter */}
+            {isCharter && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3 text-xs space-y-1">
+                <div className="text-[11px] uppercase tracking-wide text-violet-700 mb-1">Charter breakdown</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Base × {cab.capacity} seats</span>
+                  <span className="font-medium">KSh {fare.subtotal}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Charter premium (30%)</span>
+                  <span className="font-medium">+KSh {fare.charterPremium}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t">
+                  <span className="font-medium">Total</span>
+                  <span className="font-bold text-primary">KSh {fare.total}</span>
+                </div>
+              </div>
+            )}
 
             {/* Passenger details */}
             <div className="space-y-3">
@@ -152,54 +229,56 @@ export function BookingSheet({ cab, open, onOpenChange }: {
                   id="p-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Aisha M."
+                  placeholder={isCharter ? 'e.g. The Khan Family' : 'e.g. Aisha M.'}
                   className="h-9"
                 />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="p-pickup" className="text-xs flex items-center gap-1">
-                  <MapPin className="w-3 h-3" /> Pickup point (specific landmark)
+                  <MapPin className="w-3 h-3" />
+                  {pickupKind === 'stage' ? 'Stage landmark (optional)' : 'Specific pickup point'}
                 </Label>
                 <Input
                   id="p-pickup"
                   value={pickup}
                   onChange={(e) => setPickup(e.target.value)}
-                  placeholder={route.landmark}
+                  placeholder={pickupKind === 'stage' ? stage.landmark ?? stage.name : 'e.g. Near Tuskys Bamburi'}
                   className="h-9"
                 />
               </div>
 
-              <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
-                <div className="flex-1">
-                  <Label htmlFor="p-ticket" className="text-sm font-medium flex items-center gap-1">
-                    <TicketIcon className="w-4 h-4" /> I already have my e-ticket
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Skipping ticket printing shaves <span className="font-semibold">{fmtDuration(settings.ticketingBufferMin)}</span> off the buffer —
-                    so you can leave {fmtDuration(settings.ticketingBufferMin)} later and still catch the same train.
-                  </p>
+              {cab.direction === 'inbound' && (
+                <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                  <div className="flex-1">
+                    <Label htmlFor="p-ticket" className="text-sm font-medium flex items-center gap-1">
+                      <TicketIcon className="w-4 h-4" /> I already have my e-ticket
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Skipping ticket printing shaves 20m off the buffer — leave later and still catch the train.
+                    </p>
+                  </div>
+                  <Switch id="p-ticket" checked={hasTicket} onCheckedChange={setHasTicket} />
                 </div>
-                <Switch
-                  id="p-ticket"
-                  checked={hasTicket}
-                  onCheckedChange={setHasTicket}
-                />
-              </div>
+              )}
             </div>
 
             <Separator />
 
             <div className="flex items-center justify-between">
-              <SeatMeter booked={cab.bookedSeats} capacity={cab.capacity} />
-              <div className="text-right text-xs text-muted-foreground">
-                Auto-locks at <span className="font-medium text-foreground">{timing.cutoffTime}</span>
-                <br />
-                <span className={cn(timing.minutesUntilCutoff < 30 ? 'text-amber-700' : '')}>
-                  {fmtCountdown(timing.minutesUntilCutoff)}
-                </span>
-              </div>
+              <SeatMeter booked={cab.bookedSeats} capacity={cab.capacity} charterLocked={cab.charterLocked} />
+              {cab.direction === 'inbound' && (
+                <div className="text-right text-xs text-muted-foreground">
+                  Auto-locks at <span className="font-medium text-foreground">{timing.cutoffTime}</span>
+                </div>
+              )}
             </div>
+
+            {charterBlocked && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-[11px] text-amber-900">
+                This cab already has pooled passengers booked — charter is not available for it. Pick another cab.
+              </div>
+            )}
           </div>
         )}
 
@@ -210,7 +289,14 @@ export function BookingSheet({ cab, open, onOpenChange }: {
               disabled={!canBook}
               onClick={handleBook}
             >
-              {full ? 'Sold out' : `Reserve seat • KSh ${fare}`}
+              <Car className="w-4 h-4 mr-1" />
+              {full
+                ? 'Sold out'
+                : charterBlocked
+                  ? 'Charter unavailable'
+                  : isCharter
+                    ? `Book charter · KSh ${fare.total.toLocaleString()}`
+                    : `Reserve seat · KSh ${fare.total}`}
             </Button>
           </SheetFooter>
         )}

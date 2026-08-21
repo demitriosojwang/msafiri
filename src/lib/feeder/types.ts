@@ -1,32 +1,52 @@
-// SGR Feeder — domain types
-// The app solves two coordination problems:
-//   1. Inbound  (many → terminus): convert physical "wait until full" into digital "book until full"
-//   2. Outbound (terminus → many): pool arriving passengers by destination zone
+// SGR Feeder — domain types (v2)
+//
+// The app now covers both legs:
+//   1. INBOUND  — passengers heading TO the terminus to catch a departing train
+//      (cabs fill up digitally ahead of time; reverse-engineered leave time)
+//   2. OUTBOUND — passengers OFFBOARDING an arriving train and connecting with cabs
+//      at the SGR waiting/collection points (stages) for drop-off home
+//
+// Stages are the agreed pickup/drop-off points (existing SGR waiting/collection points).
+// Both legs use the same stages.
+//
+// Booking kinds:
+//   - pooled: share a cab with other passengers (default)
+//   - charter: book the whole vehicle privately (driver commits, pooled lockout kicks in)
 
 export type CabType = '4-seater' | '7-seater' | '11-seater' | '14-seater';
 
 export type Direction = 'inbound' | 'outbound';
 
+export type Coast = 'south' | 'north';
+
 export type CabStatus = 'filling' | 'locked' | 'departed' | 'arrived';
 
 export type BookingStatus = 'reserved' | 'confirmed' | 'cancelled';
 
-export type Route = {
+export type BookingKind = 'pooled' | 'charter';
+
+export type PickupKind = 'stage' | 'off-stage';
+
+// A stage = an agreed SGR waiting/collection point used as pickup/drop-off.
+// Grouped by area (Likoni, Ukunda, Bamburi, Mtwapa, Malindi, Kombani).
+export type Stage = {
   id: string;
-  name: string;            // 'Jomvu', 'Miritini', 'Shanzu', 'Bamburi', 'Nyali', 'CBD'
-  zone: Direction;         // route serves inbound (to terminus) or outbound (from terminus)
-  travelMin: number;       // typical travel time to/from Mombasa Terminus
+  name: string;            // 'Likoni Ferry Container'
+  area: string;            // 'Likoni' / 'Ukunda' / 'Bamburi' / 'Mtwapa' / 'Malindi' / 'Kombani'
+  coast: Coast;            // South Coast / North Coast
+  travelMin: number;       // typical travel time from Mombasa Terminus
   peakAdjustMin: number;   // extra minutes during peak hours
-  baseFare: number;        // KSh
-  landmark: string;        // pickup landmark e.g. 'KPLC offices'
+  landmark?: string;       // helper description
 };
 
+// A train — either departing Mombasa or arriving at Mombasa
 export type Train = {
   id: string;
-  code: string;            // 'SGR 01'
-  departureTime: string;   // 'HH:MM' (24h)
-  destination: string;     // 'Nairobi'
-  origin: string;          // 'Mombasa Terminus'
+  code: string;            // 'Madaraka Express'
+  time: string;            // 'HH:MM' (24h)
+  direction: Direction;    // inbound = depart Mombasa, outbound = arrive at Mombasa
+  origin: string;
+  destination: string;
 };
 
 export type Cab = {
@@ -36,13 +56,16 @@ export type Cab = {
   plateNumber: string;
   cabType: CabType;
   capacity: number;
-  routeId: string;
-  trainId: string;             // inbound cabs are tied to a specific train
-  direction: Direction;
+  stageId: string;             // which stage this cab is positioned at / assigned to
+  trainId: string;             // which train this cab is tied to
+  direction: Direction;        // inbound = filling to go to terminus, outbound = positioned for arrivals
   bookedSeats: number;
   status: CabStatus;
+  baseFare: number;            // KSh 450 stage base (per seat, pooled)
   currentFare: number;         // may drop near cutoff to nudge last seats
-  baseFare: number;
+  // Charter state — if true, driver has committed to a charter booking and pooled
+  // requests are locked out for this cab
+  charterLocked: boolean;
   departedAt?: number;         // epoch ms
 };
 
@@ -50,36 +73,49 @@ export type Booking = {
   id: string;
   cabId: string;
   passengerName: string;
-  pickupPoint: string;
-  hasTicket: boolean;          // tighter buffer if true (already printed e-ticket)
+  pickupPoint: string;          // stage name or off-stage landmark
+  pickupKind: PickupKind;       // stage vs off-stage
+  stageId?: string;             // stage this booking is associated with
+  offStageDistanceKm?: number;  // distance from nearest stage (off-stage only)
+  hasTicket: boolean;           // tighter buffer if true (already printed e-ticket)
   direction: Direction;
   status: BookingStatus;
+  kind: BookingKind;            // pooled vs charter
+  seatsReserved: number;        // 1 for pooled, = capacity for charter
+  farePaid: number;             // total fare for this booking
   createdAt: number;
-  destinationZoneId?: string;  // outbound only
-  isMine?: boolean;            // true if created by the current passenger in this session
+  isMine?: boolean;             // true if created by the current passenger in this session
 };
 
 export type PickupRequest = {
   id: string;
   passengerName: string;
   pickupPoint: string;
-  destinationZoneId?: string;
+  pickupKind: PickupKind;
+  stageId?: string;
+  offStageDistanceKm?: number;
   seatsRequested: number;
-  trainId?: string;            // inbound: which train they're catching
+  trainId?: string;             // which train they're catching / arrived on
   hasTicket: boolean;
   direction: Direction;
+  kind: BookingKind;            // pooled vs charter request
   createdAt: number;
   status: 'pending' | 'accepted' | 'declined';
 };
 
 export type Settings = {
-  securityBufferMin: number;   // security screening
-  ticketingBufferMin: number;  // ticket printing (skip if hasTicket)
-  checkInBufferMin: number;    // check-in gate
-  minFillThreshold: number;    // 0..1 — fraction of seats that must be booked to lock
-  lockCutoffMin: number;       // lock this many minutes before latestLeaveTime
-  nudgeDiscountPct: number;    // fare drop near cutoff
-  nudgeWindowMin: number;      // apply nudge within this window before cutoff
+  securityBufferMin: number;
+  ticketingBufferMin: number;
+  checkInBufferMin: number;
+  minFillThreshold: number;
+  lockCutoffMin: number;
+  nudgeDiscountPct: number;
+  nudgeWindowMin: number;
+  // Fare model
+  baseFareStage: number;        // KSh 450 — base fare for stage pickup (per seat, pooled)
+  offStageSurchargePerKm: number;  // KSh per km beyond the stage
+  offStageMaxRadiusKm: number;     // cap — beyond this, "meet at nearest stage"
+  charterMultiplier: number;       // charter = base × capacity × multiplier
 };
 
 export type DriverStats = {
@@ -87,21 +123,34 @@ export type DriverStats = {
   tripsCompleted: number;
   seatsFilled: number;
   seatsOffered: number;
+  chartersCompleted: number;
   rating: number;
 };
 
-// Computed timing for an inbound cab
+// Computed timing for an inbound cab (going to catch a departing train)
 export type TripTiming = {
-  trainDeparture: string;       // 'HH:MM'
-  latestLeaveTime: string;      // 'HH:MM' — reverse-engineered
+  trainDeparture: string;
+  latestLeaveTime: string;
   travelMin: number;
   securityMin: number;
-  ticketingMin: number;         // 0 if passenger has ticket
+  ticketingMin: number;
   checkInMin: number;
   totalBufferMin: number;
-  cutoffTime: string;           // when the cab auto-locks if threshold met
-  minutesUntilCutoff: number;   // can be negative if past
+  cutoffTime: string;
+  minutesUntilCutoff: number;
   minutesUntilLeave: number;
-  fillPct: number;              // 0..1
-  shouldNudge: boolean;         // in nudge window AND not at threshold
+  fillPct: number;
+  shouldNudge: boolean;
+};
+
+// Computed fare breakdown for a booking
+export type FareBreakdown = {
+  base: number;             // stage base (per seat)
+  surcharge: number;        // distance-based (0 for stage pickup)
+  perSeat: number;          // base + surcharge
+  seats: number;            // 1 for pooled, capacity for charter
+  subtotal: number;         // perSeat × seats
+  charterPremium: number;   // extra for charter privacy
+  total: number;            // final fare
+  capped: boolean;          // true if distance exceeded radius
 };
