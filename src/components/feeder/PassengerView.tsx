@@ -9,13 +9,15 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { STAGES, TRAINS, TRAINS_BY_DIR } from '@/lib/feeder/seed';
+import { STAGES, TRAINS, TRAINS_BY_DIR, fmtDateShort } from '@/lib/feeder/seed';
 import { computeTripTiming, nudgeFare, computeFare } from '@/lib/feeder/calc';
 import type { Cab, Stage, Train } from '@/lib/feeder/types';
 import { useFeederStore } from '@/store/feeder-store';
 import { SeatMeter, Stars, StatusBadge, TrainPill, CharterBadge } from './Shared';
 import { LeaveCountdownBadge } from './TripTiming';
 import { BookingSheet } from './BookingSheet';
+import { DatePicker } from './DatePicker';
+import { SeatStepper } from './SeatStepper';
 import {
   Train as TrainIcon,
   MapPin,
@@ -31,12 +33,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Anchor,
+  Calendar as CalendarIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function PassengerView() {
   const direction = useFeederStore(s => s.passengerDirection);
   const setDirection = useFeederStore(s => s.setPassengerDirection);
+  const selectedDate = useFeederStore(s => s.selectedDate);
+  const setSelectedDate = useFeederStore(s => s.setSelectedDate);
   const selectedTrainId = useFeederStore(s => s.selectedTrainId);
   const setSelectedTrainId = useFeederStore(s => s.setSelectedTrainId);
   const selectedStageId = useFeederStore(s => s.selectedStageId);
@@ -47,6 +52,8 @@ export function PassengerView() {
   const setOffStageDistanceKm = useFeederStore(s => s.setOffStageDistanceKm);
   const bookingKind = useFeederStore(s => s.bookingKind);
   const setBookingKind = useFeederStore(s => s.setBookingKind);
+  const seatsRequested = useFeederStore(s => s.seatsRequested);
+  const setSeatsRequested = useFeederStore(s => s.setSeatsRequested);
   const cabs = useFeederStore(s => s.cabs);
   const bookings = useFeederStore(s => s.bookings);
   const settings = useFeederStore(s => s.settings);
@@ -69,27 +76,27 @@ export function PassengerView() {
     return Array.from(map.entries());
   }, []);
 
-  // Available cabs for the selected train + stage
+  // Available cabs for the selected train + stage + seats
   const availableCabs = useMemo(() => {
     let list = cabs.filter(c =>
       c.trainId === selectedTrainId &&
       c.direction === direction &&
       c.status === 'filling' &&
       !c.charterLocked &&
-      (c.bookedSeats < c.capacity),
+      (c.capacity - c.bookedSeats >= (bookingKind === 'pooled' ? seatsRequested : 1)),
     );
     if (selectedStageId) {
       list = list.filter(c => c.stageId === selectedStageId);
     }
     return list;
-  }, [cabs, selectedTrainId, selectedStageId, direction]);
+  }, [cabs, selectedTrainId, selectedStageId, direction, seatsRequested, bookingKind]);
 
   function openBooking(cab: Cab) {
     setSelectedCab(cab);
     setSheetOpen(true);
   }
 
-  // Live fare preview for the current pickupKind + distance + bookingKind
+  // Live fare preview for the current pickupKind + distance + bookingKind + seats
   const previewCapacity = selectedCab?.capacity ?? 4;
   const farePreview = computeFare({
     settings,
@@ -98,6 +105,10 @@ export function PassengerView() {
     kind: bookingKind,
     capacity: previewCapacity,
   });
+  // For pooled with multiple seats, total = perSeat × seatsRequested
+  const pooledTotal = bookingKind === 'pooled'
+    ? farePreview.perSeat * seatsRequested
+    : farePreview.total;
 
   return (
     <div className="space-y-4 pb-4">
@@ -122,6 +133,18 @@ export function PassengerView() {
           transition={{ duration: 0.18 }}
           className="space-y-4"
         >
+          {/* Date picker */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+              <CalendarIcon className="w-3.5 h-3.5" />
+              {direction === 'inbound' ? 'Travelling on which date?' : 'Arriving on which date?'}
+            </div>
+            <DatePicker value={selectedDate} onChange={setSelectedDate} />
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Selected: <span className="font-medium text-foreground">{fmtDateShort(selectedDate)}</span>
+            </div>
+          </div>
+
           {/* Train selector */}
           <div>
             <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
@@ -314,6 +337,9 @@ export function PassengerView() {
                     />
                   )}
                   <Row label="Per seat" value={`KSh ${farePreview.perSeat}`} />
+                  {bookingKind === 'pooled' && seatsRequested > 1 && (
+                    <Row label={`Seats × ${seatsRequested}`} value={`KSh ${farePreview.perSeat} × ${seatsRequested}`} />
+                  )}
                   {bookingKind === 'charter' && (
                     <>
                       <Row label={`Seats (whole vehicle)`} value={`${farePreview.seats}`} />
@@ -326,12 +352,35 @@ export function PassengerView() {
                   )}
                 </div>
                 <div className="flex items-center justify-between pt-1.5 border-t">
-                  <span className="text-sm font-medium">Total</span>
-                  <span className="text-lg font-bold tabular-nums text-primary">KSh {farePreview.total}</span>
+                  <span className="text-sm font-medium">
+                    Total {bookingKind === 'pooled' && seatsRequested > 1 && `(${seatsRequested} seats)`}
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-primary">KSh {pooledTotal.toLocaleString()}</span>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Seat count selector (pooled only — charter books whole vehicle) */}
+          {bookingKind === 'pooled' && (
+            <div>
+              <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                <Users className="w-3.5 h-3.5" /> How many seats?
+              </div>
+              <SeatStepper
+                value={seatsRequested}
+                onChange={setSeatsRequested}
+                min={1}
+                max={14}
+              />
+              {seatsRequested > 1 && (
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  Booking for <span className="font-medium text-foreground">{seatsRequested} passengers</span> —
+                  total fare: <span className="font-medium text-primary">KSh {(farePreview.perSeat * seatsRequested).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Available cabs */}
           <div className="space-y-2">
@@ -355,7 +404,7 @@ export function PassengerView() {
             {availableCabs.map(cab => {
               const stage = STAGES.find(s => s.id === cab.stageId)!;
               const train = TRAINS.find(t => t.id === cab.trainId)!;
-              const timing = computeTripTiming(cab, stage, train, settings, false);
+              const timing = computeTripTiming(cab, stage, train, settings, false, undefined, selectedDate);
               const fare = nudgeFare(cab, timing, settings);
               const full = cab.bookedSeats >= cab.capacity;
               const charterBlocked = bookingKind === 'charter' && cab.bookedSeats > 0;
@@ -370,6 +419,7 @@ export function PassengerView() {
                     timing={timing}
                     full={full || charterBlocked}
                     bookingKind={bookingKind}
+                    seatsRequested={seatsRequested}
                     onBook={() => openBooking(cab)}
                   />
                 </motion.div>
@@ -417,9 +467,14 @@ export function PassengerView() {
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      {cab.cabType} · {cab.plateNumber} · {train?.code} {train?.time}
+                      {fmtDateShort(selectedDate)} · {cab.cabType} · {cab.plateNumber} · {train?.code} {train?.time}
                     </div>
-                    <div className="text-xs font-medium mt-0.5">KSh {b.farePaid}</div>
+                    <div className="text-xs font-medium mt-0.5">
+                      KSh {b.farePaid.toLocaleString()}
+                      {b.kind === 'pooled' && b.seatsReserved > 1 && (
+                        <span className="text-muted-foreground font-normal"> ({b.seatsReserved} seats)</span>
+                      )}
+                    </div>
                   </div>
                   <StatusBadge status={cab.status} />
                 </CardContent>
@@ -443,11 +498,12 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CabCard({ cab, stage, train, fare, timing, full, bookingKind, onBook }: {
+function CabCard({ cab, stage, train, fare, timing, full, bookingKind, seatsRequested, onBook }: {
   cab: Cab; stage: Stage; train: Train; fare: number;
   timing: ReturnType<typeof computeTripTiming>;
-  full: boolean; bookingKind: 'pooled' | 'charter'; onBook: () => void;
+  full: boolean; bookingKind: 'pooled' | 'charter'; seatsRequested: number; onBook: () => void;
 }) {
+  const pooledTotal = fare * seatsRequested;
   return (
     <Card className="overflow-hidden">
       <CardContent className="p-3 space-y-2.5">
@@ -474,15 +530,22 @@ function CabCard({ cab, stage, train, fare, timing, full, bookingKind, onBook }:
           </div>
           <div className="text-right shrink-0">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              {bookingKind === 'charter' ? 'Charter' : 'Fare'}
+              {bookingKind === 'charter'
+                ? 'Charter'
+                : seatsRequested > 1
+                  ? `${seatsRequested} seats`
+                  : 'Fare'}
             </div>
             <div className="font-bold text-primary tabular-nums">
               KSh {bookingKind === 'charter'
                 ? Math.round(cab.baseFare * cab.capacity * 1.3).toLocaleString()
-                : fare}
+                : pooledTotal.toLocaleString()}
             </div>
-            {bookingKind === 'pooled' && fare < cab.baseFare && (
+            {bookingKind === 'pooled' && seatsRequested === 1 && fare < cab.baseFare && (
               <div className="text-[10px] line-through text-muted-foreground">KSh {cab.baseFare}</div>
+            )}
+            {bookingKind === 'pooled' && seatsRequested > 1 && (
+              <div className="text-[10px] text-muted-foreground">KSh {fare}/seat</div>
             )}
           </div>
         </div>
@@ -512,10 +575,12 @@ function CabCard({ cab, stage, train, fare, timing, full, bookingKind, onBook }:
           {full
             ? cab.bookedSeats > 0 && bookingKind === 'charter'
               ? 'Has pooled passengers'
-              : 'Sold out'
+              : 'Not enough seats'
             : bookingKind === 'charter'
               ? `Book charter · KSh ${Math.round(cab.baseFare * cab.capacity * 1.3).toLocaleString()}`
-              : 'Reserve seat'}
+              : seatsRequested > 1
+                ? `Reserve ${seatsRequested} seats · KSh ${pooledTotal.toLocaleString()}`
+                : 'Reserve seat'}
         </Button>
       </CardContent>
     </Card>

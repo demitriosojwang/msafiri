@@ -120,3 +120,57 @@ Stage Summary:
 - Admin panel surfaces coverage gaps (Fayaz & ShikaAdabu — passengers waiting, no cab) and provides stage-by-stage arrival monitoring.
 - Files modified: `src/lib/feeder/{types,seed,calc}.ts`, `src/store/feeder-store.ts`, `src/components/feeder/{FeederApp,PassengerView,DriverView,BookingSheet,Shared,AdminView}.tsx`.
 - Screenshots saved to `/home/z/my-project/download/sgr-feeder-{passenger-v2,driver-charter,admin-arrivals,admin-stages}.png`.
+
+---
+Task ID: 5
+Agent: main
+Task: Add date picker (re-implement after session reset) + seat count selector for multi-seat pooled bookings.
+
+Work Log:
+- Discovered previous session's date picker changes were lost (files reverted to pre-date-picker state).
+- Re-implemented date picker from scratch AND added new seat count feature together.
+- Added date helpers to `src/lib/feeder/seed.ts`: `atTimeOnDate()`, `todayStr()`, `fmtDateShort()`, `isToday()`, `isTomorrow()`.
+- Updated `computeTripTiming()` in `calc.ts` to accept optional `dateStr` parameter for computing timing on a specific date.
+- Added `selectedDate` and `seatsRequested` state to the store, with `setSelectedDate` and `setSeatsRequested` actions.
+- Updated `bookSeat` action to accept `seatsRequested` from store state (not just 1):
+  • Validates `cab.bookedSeats + seatsRequested <= cab.capacity`
+  • Creates booking with `seatsReserved: seatsRequested` and `farePaid: perSeat * seatsRequested`
+  • Increments `cab.bookedSeats` by `seatsRequested`
+- Updated `cancelBooking` to decrement by `booking.seatsReserved` (not just 1).
+- Updated `setBookingKind` to reset `seatsRequested` to 1 when switching to pooled, 0 when switching to charter.
+- Created `DatePicker.tsx` component: Today/Tomorrow quick-select pills + calendar popover for any future date. Past dates disabled.
+- Created `SeatStepper.tsx` component: +/- buttons with count display, min=1, max=14. Shows "Passengers" label and available seats hint.
+- Updated `PassengerView.tsx`:
+  • Added date picker above train selector ("Travelling on which date?" / "Arriving on which date?")
+  • Added seat stepper after pickup options card (pooled only — hidden for charter)
+  • Updated `availableCabs` filter to only show cabs with enough remaining seats: `capacity - bookedSeats >= seatsRequested`
+  • Updated live fare preview to show "Seats × N" row and "Total (N seats)" = perSeat × seatsRequested
+  • Updated CabCard to show "N seats" label, "KSh perSeat/seat" subtext, and "Reserve N seats · KSh total" button
+  • Updated "My bookings" to show date and seat count
+  • Passed `selectedDate` to all `computeTripTiming` calls
+- Updated `BookingSheet.tsx`:
+  • Added `seatsRequested` and `selectedDate` from store
+  • Updated timing call to pass `selectedDate`
+  • Updated fare display: "N seats" label, "N × KSh perSeat" subtext, total = perSeat × seatsRequested
+  • Added date to train info card
+  • Updated reserve button: "Reserve N seats · KSh total"
+  • Updated confirmation toast: "N seats reserved on [driver]'s [cabType] for [date]. Leave by [time]."
+- Updated `DriverView.tsx` manifest to show "(N seats)" next to passenger name when seatsReserved > 1.
+- Ran ESLint — clean.
+- Verified with agent-browser (iPhone 14):
+  • Date picker renders with Today/Tomorrow/Pick date pills, "Selected: Sat 22 Aug" display
+  • Seat stepper renders with "1 SEAT", Decrease disabled, Increase enabled
+  • Clicking Increase updates to "2 SEATS", fare preview shows "Seats × 2 = KSh 450 × 2", Total = KSh 900
+  • "Booking for 2 passengers — total fare: KSh 900" text appears
+  • Cab buttons update to "Reserve 2 seats · KSh 900"
+  • Increasing to 3 seats filters out cabs with fewer than 3 available seats (4-seater with 2 left disappears)
+  • Opening booking sheet shows "3 seats KSh 1,350" with "3 × KSh 450" breakdown
+  • Completing booking shows "3 seats reserved on Halima's 14-seater for Sun 23 Aug. Leave by 13:10."
+  • No console errors, no runtime errors
+
+Stage Summary:
+- Both features fully integrated: date picker + multi-seat booking.
+- Passenger flow now matches the bus-booking pattern: pick date → pick train → pick stage → choose ride type → select number of seats → see live fare → book.
+- Available cabs filter automatically based on seat availability — a cab with 2 seats left won't show when you need 3.
+- Driver manifest shows seat count per passenger so drivers know how many people to expect at each pickup.
+- Files modified: `src/lib/feeder/seed.ts`, `src/lib/feeder/calc.ts`, `src/store/feeder-store.ts`, `src/components/feeder/{DatePicker,SeatStepper,PassengerView,BookingSheet,DriverView}.tsx`.

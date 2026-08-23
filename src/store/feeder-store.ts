@@ -11,6 +11,7 @@ import {
   STAGES,
   TRAINS,
   ACTIVE_DRIVER_ID,
+  todayStr,
 } from '@/lib/feeder/seed';
 import { computeTripTiming, nudgeFare, computeFare, canDriverAcceptCharter } from '@/lib/feeder/calc';
 
@@ -25,12 +26,14 @@ interface FeederState {
   requests: PickupRequest[];
   // Passenger view state
   passengerDirection: PassengerDirection;
+  selectedDate: string;            // YYYY-MM-DD
   selectedTrainId: string;
   selectedStageId: string | null;
   // Booking form state
   pickupKind: PickupKind;
   offStageDistanceKm: number;
   bookingKind: BookingKind;
+  seatsRequested: number;          // how many seats the passenger wants (pooled only)
   // Driver view state
   activeDriverCabId: string;
   driverStats: typeof DRIVER_STATS;
@@ -38,11 +41,13 @@ interface FeederState {
   // Actions
   setRole: (r: Role) => void;
   setPassengerDirection: (d: PassengerDirection) => void;
+  setSelectedDate: (d: string) => void;
   setSelectedTrainId: (id: string) => void;
   setSelectedStageId: (id: string | null) => void;
   setPickupKind: (k: PickupKind) => void;
   setOffStageDistanceKm: (km: number) => void;
   setBookingKind: (k: BookingKind) => void;
+  setSeatsRequested: (n: number) => void;
 
   bookSeat: (cabId: string, passengerName: string, pickupPoint: string, hasTicket: boolean) => string | null;
   bookCharter: (cabId: string, passengerName: string, pickupPoint: string, hasTicket: boolean) => string | null;
@@ -76,11 +81,13 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   bookings: SEED_BOOKINGS,
   requests: SEED_REQUESTS,
   passengerDirection: 'inbound',
+  selectedDate: todayStr(),
   selectedTrainId: 't-dep-2',
   selectedStageId: null,
   pickupKind: 'stage',
   offStageDistanceKm: 0,
   bookingKind: 'pooled',
+  seatsRequested: 1,
   activeDriverCabId: ACTIVE_DRIVER_ID,
   driverStats: DRIVER_STATS,
 
@@ -90,18 +97,21 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const trainId = d === 'inbound' ? 't-dep-2' : 't-arr-2';
     set({ passengerDirection: d, selectedTrainId: trainId, selectedStageId: null });
   },
+  setSelectedDate: (d) => set({ selectedDate: d }),
   setSelectedTrainId: (id) => set({ selectedTrainId: id, selectedStageId: null }),
   setSelectedStageId: (id) => set({ selectedStageId: id }),
   setPickupKind: (k) => set({ pickupKind: k }),
   setOffStageDistanceKm: (km) => set({ offStageDistanceKm: km }),
-  setBookingKind: (k) => set({ bookingKind: k }),
+  setBookingKind: (k) => set({ bookingKind: k, ...(k === 'charter' ? { seatsRequested: 0 } : { seatsRequested: 1 }) }),
+  setSeatsRequested: (n) => set({ seatsRequested: Math.max(1, Math.min(14, n)) }),
 
   bookSeat: (cabId, passengerName, pickupPoint, hasTicket) => {
     const state = get();
     const cab = state.cabs.find(c => c.id === cabId);
     if (!cab) return null;
     if (cab.charterLocked) return null;
-    if (cab.bookedSeats >= cab.capacity) return null;
+    const seatsRequested = state.seatsRequested;
+    if (cab.bookedSeats + seatsRequested > cab.capacity) return null;
 
     const stage = STAGES.find(s => s.id === cab.stageId)!;
     const fare = computeFare({
@@ -125,8 +135,8 @@ export const useFeederStore = create<FeederState>((set, get) => ({
       direction: cab.direction,
       status: 'reserved',
       kind: 'pooled',
-      seatsReserved: 1,
-      farePaid: fare.total,
+      seatsReserved: seatsRequested,
+      farePaid: fare.perSeat * seatsRequested,
       createdAt: Date.now(),
       isMine: true,
     };
@@ -134,7 +144,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     set({
       bookings: [...state.bookings, newBooking],
       cabs: state.cabs.map(c =>
-        c.id === cabId ? { ...c, bookedSeats: c.bookedSeats + 1 } : c,
+        c.id === cabId ? { ...c, bookedSeats: c.bookedSeats + seatsRequested } : c,
       ),
     });
 
@@ -142,7 +152,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const updated = get().cabs.find(c => c.id === cabId);
     if (updated) {
       const train = TRAINS.find(t => t.id === updated.trainId)!;
-      const timing = computeTripTiming(updated, stage, train, state.settings, hasTicket);
+      const timing = computeTripTiming(updated, stage, train, state.settings, hasTicket, undefined, get().selectedDate);
       const newFare = nudgeFare(updated, timing, state.settings);
       if (newFare !== updated.currentFare) {
         set({
@@ -210,6 +220,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     if (!cab) return;
 
     const wasCharter = booking.kind === 'charter';
+    const seats = booking.seatsReserved;
     set({
       bookings: state.bookings.map(b =>
         b.id === bookingId ? { ...b, status: 'cancelled' as const } : b,
@@ -219,7 +230,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
         if (wasCharter) {
           return { ...c, charterLocked: false, bookedSeats: 0 };
         }
-        return { ...c, bookedSeats: Math.max(0, c.bookedSeats - 1) };
+        return { ...c, bookedSeats: Math.max(0, c.bookedSeats - seats) };
       }),
     });
   },

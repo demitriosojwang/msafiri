@@ -6,7 +6,7 @@
 //   2. FARE model: base KSh 450 (stage) + distance surcharge (off-stage) + charter premium.
 
 import type { Cab, Settings, Stage, Train, TripTiming, Booking, FareBreakdown, PickupKind, BookingKind } from './types';
-import { atTime, SIM_NOW } from './seed';
+import { atTime, atTimeOnDate, SIM_NOW } from './seed';
 
 const PEAK_HOURS = [
   { start: 6, end: 9 },     // morning rush
@@ -38,6 +38,7 @@ export function bufferFor(settings: Settings, hasTicket: boolean): {
 
 // THE CORE INBOUND FUNCTION — given a train + stage + passenger ticket status, compute
 // the latest time the cab can leave the stage and still get passengers to the train on time.
+// `dateStr` (YYYY-MM-DD) determines which day the train runs on.
 export function computeTripTiming(
   cab: Cab,
   stage: Stage,
@@ -45,8 +46,9 @@ export function computeTripTiming(
   settings: Settings,
   hasTicket = false,
   now = SIM_NOW,
+  dateStr?: string,
 ): TripTiming {
-  const departureMs = atTime(train.time);
+  const departureMs = dateStr ? atTimeOnDate(train.time, dateStr) : atTime(train.time);
   const buffer = bufferFor(settings, hasTicket);
 
   let candidateLeave = departureMs - (buffer.total + stage.travelMin) * 60 * 1000;

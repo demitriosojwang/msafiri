@@ -303,7 +303,12 @@ export function DriverView() {
                       {b.kind === 'charter' ? <Crown className="w-3 h-3" /> : b.passengerName.charAt(0)}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-medium truncate">{b.passengerName}</div>
+                      <div className="font-medium truncate">
+                        {b.passengerName}
+                        {b.kind === 'pooled' && b.seatsReserved > 1 && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">({b.seatsReserved} seats)</span>
+                        )}
+                      </div>
                       <div className="text-[10px] text-muted-foreground flex items-center gap-1">
                         <MapPin className="w-2.5 h-2.5" /> {b.pickupPoint}
                         {b.pickupKind === 'off-stage' && b.offStageDistanceKm && (

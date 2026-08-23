@@ -81,6 +81,45 @@ export function atTime(hhmm: string, dayOffset = 0): number {
   return d.getTime();
 }
 
+// Helper: specific date (YYYY-MM-DD) at HH:MM as epoch ms
+export function atTimeOnDate(hhmm: string, dateStr: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  const [y, mo, da] = dateStr.split('-').map(Number);
+  const d = new Date(y, mo - 1, da, h, m, 0, 0);
+  return d.getTime();
+}
+
+// Today as YYYY-MM-DD
+export function todayStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${da}`;
+}
+
+// Format a YYYY-MM-DD date for display: "Mon 19 Aug"
+export function fmtDateShort(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${days[date.getDay()]} ${d} ${months[date.getMonth()]}`;
+}
+
+export function isToday(dateStr: string): boolean {
+  return dateStr === todayStr();
+}
+
+export function isTomorrow(dateStr: string): boolean {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return dateStr === `${y}-${m}-${da}`;
+}
+
 // Seed cabs — both inbound (filling for departures) and outbound (positioned for arrivals)
 export const SEED_CABS: Cab[] = [
   // --- INBOUND: filling for the 15:00 departure ---

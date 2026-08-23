@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { STAGES, TRAINS } from '@/lib/feeder/seed';
+import { STAGES, TRAINS, fmtDateShort } from '@/lib/feeder/seed';
 import { computeTripTiming, computeFare } from '@/lib/feeder/calc';
 import type { Cab } from '@/lib/feeder/types';
 import { useFeederStore } from '@/store/feeder-store';
@@ -35,6 +35,8 @@ export function BookingSheet({ cab, open, onOpenChange }: {
   const pickupKind = useFeederStore(s => s.pickupKind);
   const offStageDistanceKm = useFeederStore(s => s.offStageDistanceKm);
   const bookingKind = useFeederStore(s => s.bookingKind);
+  const seatsRequested = useFeederStore(s => s.seatsRequested);
+  const selectedDate = useFeederStore(s => s.selectedDate);
   const bookSeat = useFeederStore(s => s.bookSeat);
   const bookCharter = useFeederStore(s => s.bookCharter);
   const { toast } = useToast();
@@ -45,7 +47,7 @@ export function BookingSheet({ cab, open, onOpenChange }: {
   const train = TRAINS.find(t => t.id === cab.trainId);
   if (!stage || !train) return null;
 
-  const timing = computeTripTiming(cab, stage, train, settings, hasTicket);
+  const timing = computeTripTiming(cab, stage, train, settings, hasTicket, undefined, selectedDate);
   const isCharter = bookingKind === 'charter';
 
   const fare = computeFare({
@@ -55,8 +57,10 @@ export function BookingSheet({ cab, open, onOpenChange }: {
     kind: bookingKind,
     capacity: cab.capacity,
   });
+  // For pooled with multiple seats, total = perSeat × seatsRequested
+  const totalFare = isCharter ? fare.total : fare.perSeat * seatsRequested;
 
-  const full = cab.bookedSeats >= cab.capacity;
+  const full = !isCharter && (cab.bookedSeats + seatsRequested > cab.capacity);
   const charterBlocked = isCharter && cab.bookedSeats > 0;
   const canBook = name.trim().length > 1 && pickup.trim().length > 1 && !full && !charterBlocked;
 
@@ -70,8 +74,10 @@ export function BookingSheet({ cab, open, onOpenChange }: {
       toast({
         title: isCharter ? 'Charter reserved' : 'Seat reserved',
         description: isCharter
-          ? `Whole ${cab.cabType} reserved for ${cab.driverName}. Leave by ${timing.latestLeaveTime}.`
-          : `You're on ${cab.driverName}'s ${cab.cabType}. Leave by ${timing.latestLeaveTime}.`,
+          ? `Whole ${cab.cabType} reserved for ${cab.driverName} on ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`
+          : seatsRequested > 1
+            ? `${seatsRequested} seats reserved on ${cab.driverName}'s ${cab.cabType} for ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`
+            : `You're on ${cab.driverName}'s ${cab.cabType} on ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`,
       });
     }
   }
@@ -113,17 +119,22 @@ export function BookingSheet({ cab, open, onOpenChange }: {
             </div>
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {isCharter ? 'Total fare' : 'Fare'}
+                {isCharter ? 'Total fare' : seatsRequested > 1 ? `${seatsRequested} seats` : 'Fare'}
               </div>
               <div className="text-2xl font-bold tabular-nums text-primary">
-                KSh {fare.total.toLocaleString()}
+                KSh {totalFare.toLocaleString()}
               </div>
               {isCharter && (
                 <div className="text-[10px] text-muted-foreground">
                   {fare.seats} seats × KSh {fare.perSeat} + KSh {fare.charterPremium}
                 </div>
               )}
-              {!isCharter && cab.currentFare < cab.baseFare && (
+              {!isCharter && seatsRequested > 1 && (
+                <div className="text-[10px] text-muted-foreground">
+                  {seatsRequested} × KSh {fare.perSeat}
+                </div>
+              )}
+              {!isCharter && seatsRequested === 1 && cab.currentFare < cab.baseFare && (
                 <div className="text-[10px] line-through text-muted-foreground">KSh {cab.baseFare}</div>
               )}
             </div>
@@ -169,6 +180,9 @@ export function BookingSheet({ cab, open, onOpenChange }: {
                 <div className="font-medium">{train.code}</div>
                 <div className="text-xs text-muted-foreground">
                   {cab.direction === 'inbound' ? 'Departs' : 'Arrives'} {train.time}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {fmtDateShort(selectedDate)}
                 </div>
               </div>
             </div>
@@ -291,12 +305,14 @@ export function BookingSheet({ cab, open, onOpenChange }: {
             >
               <Car className="w-4 h-4 mr-1" />
               {full
-                ? 'Sold out'
+                ? 'Not enough seats'
                 : charterBlocked
                   ? 'Charter unavailable'
                   : isCharter
-                    ? `Book charter · KSh ${fare.total.toLocaleString()}`
-                    : `Reserve seat · KSh ${fare.total}`}
+                    ? `Book charter · KSh ${totalFare.toLocaleString()}`
+                    : seatsRequested > 1
+                      ? `Reserve ${seatsRequested} seats · KSh ${totalFare.toLocaleString()}`
+                      : `Reserve seat · KSh ${totalFare}`}
             </Button>
           </SheetFooter>
         )}
