@@ -267,18 +267,31 @@ export const SEED_BOOKINGS: Booking[] = [
 ];
 
 function booking(
-  id: string, cabId: string, passengerName: string, pickupPoint: string,
+  id: string, cabId: string | undefined, passengerName: string, pickupPoint: string,
   pickupKind: 'stage' | 'off-stage', stageId: string | undefined,
   offStageDistanceKm: number | undefined, hasTicket: boolean, direction: 'inbound' | 'outbound',
   kind: 'pooled' | 'charter', seatsReserved: number, farePaid: number,
+  vehicleTypePreference?: '4-seater' | '7-seater' | '11-seater' | '14-seater',
 ): Booking {
   return {
     id, cabId, passengerName, pickupPoint, pickupKind, stageId,
     offStageDistanceKm, hasTicket, direction, status: 'reserved',
     kind, seatsReserved, farePaid,
     createdAt: SIM_NOW - 1000 * 60 * 30,
+    vehicleTypePreference,
   };
 }
+
+// Unassigned bookings — passengers who booked a vehicle type but no specific cab.
+// These are waiting for auto-assignment by the allocation engine.
+export const SEED_UNASSIGNED: Booking[] = [
+  booking('u1', undefined, 'Amina W.', 'Nyali Center', 'stage', 's-nyali-center', undefined, true, 'inbound', 'pooled', 2, 900, '7-seater'),
+  booking('u2', undefined, 'Peter K.', 'Bamburi Mwisho', 'stage', 's-bamburi-mwisho', undefined, false, 'inbound', 'pooled', 1, 450, '4-seater'),
+  booking('u3', undefined, 'Susan M.', 'Likoni Ferry Container', 'stage', 's-likoni-ferry', undefined, true, 'inbound', 'pooled', 3, 1350, '7-seater'),
+  booking('u4', undefined, 'Grace A.', 'Kiembeni Mwisho', 'stage', 's-kiembeni-mwisho', undefined, true, 'inbound', 'pooled', 1, 450, '4-seater'),
+  booking('u5', undefined, 'John O.', 'Naivas Diani', 'stage', 's-naivas-diani', undefined, false, 'inbound', 'pooled', 2, 900, '11-seater'),
+  booking('u6', undefined, 'Mary N.', 'JCC Junction', 'stage', 's-jcc-junction', undefined, true, 'inbound', 'pooled', 1, 450, '4-seater'),
+];
 
 export const DRIVER_STATS: DriverStats = {
   todayEarningsKSh: 2450,

@@ -5,6 +5,7 @@ import type { Booking, Cab, PickupRequest, Settings, BookingKind, PickupKind } f
 import {
   DRIVER_STATS,
   SEED_BOOKINGS,
+  SEED_UNASSIGNED,
   SEED_CABS,
   SEED_REQUESTS,
   SETTINGS,
@@ -57,6 +58,7 @@ interface FeederState {
   declineRequest: (requestId: string) => void;
   startTrip: (cabId: string) => void;
   assignCabToStage: (cabId: string, stageId: string) => void;
+  autoAssign: (trainId: string) => { assigned: number; unassigned: number; details: string[] };
 
   // Selectors
   getCab: (id: string) => Cab | undefined;
@@ -78,7 +80,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   role: 'passenger',
   settings: SETTINGS,
   cabs: SEED_CABS,
-  bookings: SEED_BOOKINGS,
+  bookings: [...SEED_BOOKINGS, ...SEED_UNASSIGNED],
   requests: SEED_REQUESTS,
   passengerDirection: 'inbound',
   selectedDate: todayStr(),
@@ -374,6 +376,113 @@ export const useFeederStore = create<FeederState>((set, get) => ({
         c.id === cabId ? { ...c, stageId } : c,
       ),
     });
+  },
+
+  autoAssign: (trainId) => {
+    const state = get();
+    const train = TRAINS.find(t => t.id === trainId);
+    if (!train) return { assigned: 0, unassigned: 0, details: ['Train not found'] };
+
+    // Gather unassigned bookings for this train (matching direction)
+    const unassigned = state.bookings.filter(b =>
+      !b.cabId &&
+      b.status !== 'cancelled' &&
+      b.direction === train.direction
+    );
+
+    if (unassigned.length === 0) {
+      return { assigned: 0, unassigned: 0, details: ['No unassigned bookings for this train'] };
+    }
+
+    // Gather available cabs for this train
+    const availableCabs = state.cabs.filter(c =>
+      c.trainId === trainId &&
+      c.status === 'filling' &&
+      !c.charterLocked &&
+      (c.capacity - c.bookedSeats) > 0
+    );
+
+    if (availableCabs.length === 0) {
+      return { assigned: 0, unassigned: unassigned.length, details: ['No available cabs'] };
+    }
+
+    // Sort bookings by seatsRequested DESC (pack big groups first)
+    const sortedBookings = [...unassigned].sort((a, b) => b.seatsReserved - a.seatsReserved);
+
+    // Build a working copy of cab loads
+    const cabLoads = new Map<string, number>();
+    availableCabs.forEach(c => cabLoads.set(c.id, c.bookedSeats));
+
+    // Track assignment count per driver for fairness (recency penalty)
+    const driverAssignmentCount = new Map<string, number>();
+    availableCabs.forEach(c => driverAssignmentCount.set(c.driverName, 0));
+
+    const details: string[] = [];
+    let assignedCount = 0;
+    let stillUnassigned = 0;
+
+    // Update bookings and cabs
+    const newBookings = [...state.bookings];
+    const newCabs = [...state.cabs];
+    const now = Date.now();
+
+    for (const booking of sortedBookings) {
+      // Compute fairness score for each cab and sort
+      const scoredCabs = availableCabs
+        .map(cab => {
+          const currentLoad = cabLoads.get(cab.id) ?? cab.bookedSeats;
+          const remaining = cab.capacity - currentLoad;
+          const recentAssignments = driverAssignmentCount.get(cab.driverName) ?? 0;
+          // Fairness score: lower = assign first
+          // - currentLoad: emptier cabs first (load balancing)
+          // - recentAssignments * 2: recency penalty
+          // - rating * 0.5: small rating bonus (negative = preferred)
+          const score = currentLoad + (recentAssignments * 2) - (cab.driverRating * 0.5);
+          return { cab, remaining, score };
+        })
+        .filter(s => s.remaining >= booking.seatsReserved)
+        .sort((a, b) => a.score - b.score);
+
+      if (scoredCabs.length === 0) {
+        // No cab can fit this booking
+        stillUnassigned++;
+        details.push(`⚠ ${booking.passengerName} (${booking.seatsReserved} seats) — no cab with enough capacity`);
+        continue;
+      }
+
+      const chosen = scoredCabs[0];
+      const cab = chosen.cab;
+
+      // Update booking
+      const bookingIdx = newBookings.findIndex(b => b.id === booking.id);
+      if (bookingIdx >= 0) {
+        newBookings[bookingIdx] = {
+          ...newBookings[bookingIdx],
+          cabId: cab.id,
+          assignedAt: now,
+        };
+      }
+
+      // Update cab load
+      const newLoad = (cabLoads.get(cab.id) ?? cab.bookedSeats) + booking.seatsReserved;
+      cabLoads.set(cab.id, newLoad);
+
+      // Update driver recency
+      driverAssignmentCount.set(cab.driverName, (driverAssignmentCount.get(cab.driverName) ?? 0) + 1);
+
+      // Update cab in newCabs
+      const cabIdx = newCabs.findIndex(c => c.id === cab.id);
+      if (cabIdx >= 0) {
+        newCabs[cabIdx] = { ...newCabs[cabIdx], bookedSeats: newLoad };
+      }
+
+      assignedCount++;
+      details.push(`✓ ${booking.passengerName} (${booking.seatsReserved} seat${booking.seatsReserved > 1 ? 's' : ''}) → ${cab.driverName}'s ${cab.cabType} [${cab.plateNumber}]`);
+    }
+
+    set({ bookings: newBookings, cabs: newCabs });
+
+    return { assigned: assignedCount, unassigned: stillUnassigned, details };
   },
 
   getCab: (id) => get().cabs.find(c => c.id === id),

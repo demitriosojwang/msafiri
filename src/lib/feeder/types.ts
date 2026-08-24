@@ -71,20 +71,22 @@ export type Cab = {
 
 export type Booking = {
   id: string;
-  cabId: string;
+  cabId?: string;                 // optional — null means "pending auto-assignment"
   passengerName: string;
-  pickupPoint: string;          // stage name or off-stage landmark
-  pickupKind: PickupKind;       // stage vs off-stage
-  stageId?: string;             // stage this booking is associated with
-  offStageDistanceKm?: number;  // distance from nearest stage (off-stage only)
-  hasTicket: boolean;           // tighter buffer if true (already printed e-ticket)
+  pickupPoint: string;
+  pickupKind: PickupKind;
+  stageId?: string;
+  offStageDistanceKm?: number;
+  hasTicket: boolean;
   direction: Direction;
   status: BookingStatus;
-  kind: BookingKind;            // pooled vs charter
-  seatsReserved: number;        // 1 for pooled, = capacity for charter
-  farePaid: number;             // total fare for this booking
+  kind: BookingKind;
+  seatsReserved: number;
+  farePaid: number;
   createdAt: number;
-  isMine?: boolean;             // true if created by the current passenger in this session
+  isMine?: boolean;
+  vehicleTypePreference?: CabType;  // what vehicle type the passenger requested
+  assignedAt?: number;              // when auto-assignment ran
 };
 
 export type PickupRequest = {

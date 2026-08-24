@@ -26,15 +26,18 @@ import {
   Eye,
   Ruler,
   Shield,
+  Zap,
+  ArrowRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 export function AdminView() {
   const cabs = useFeederStore(s => s.cabs);
   const bookings = useFeederStore(s => s.bookings);
   const requests = useFeederStore(s => s.requests);
   const settings = useFeederStore(s => s.settings);
-  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters'>('arrivals');
+  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters' | 'autoassign'>('arrivals');
 
   // Aggregate metrics
   const metrics = useMemo(() => {
@@ -46,6 +49,7 @@ export function AdminView() {
     const revenue = bookings
       .filter(b => b.status !== 'cancelled')
       .reduce((s, b) => s + b.farePaid, 0);
+    const unassignedBookings = bookings.filter(b => !b.cabId && b.status !== 'cancelled').length;
 
     return {
       activeCabs: activeCabs.length,
@@ -56,6 +60,7 @@ export function AdminView() {
       charterCabs,
       pendingRequests,
       revenue,
+      unassignedBookings,
     };
   }, [cabs, bookings, requests]);
 
@@ -115,11 +120,11 @@ export function AdminView() {
           sub={`${metrics.charterCabs} charter${metrics.charterCabs !== 1 ? 's' : ''} active`}
         />
         <MetricCard
-          icon={<Users className="w-4 h-4" />}
-          label="Pending requests"
-          value={String(metrics.pendingRequests)}
-          sub="needs driver match"
-          subClass={metrics.pendingRequests > 0 ? 'text-amber-700' : ''}
+          icon={<Zap className="w-4 h-4" />}
+          label="Unassigned bookings"
+          value={String(metrics.unassignedBookings)}
+          sub="waiting for auto-assignment"
+          subClass={metrics.unassignedBookings > 0 ? 'text-amber-700' : ''}
         />
         <MetricCard
           icon={<AlertTriangle className="w-4 h-4" />}
@@ -164,7 +169,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid grid-cols-4 w-full">
+        <TabsList className="grid grid-cols-5 w-full">
           <TabsTrigger value="arrivals" className="text-xs flex items-center gap-1">
             <Anchor className="w-3 h-3" /> Arrivals
           </TabsTrigger>
@@ -176,6 +181,9 @@ export function AdminView() {
           </TabsTrigger>
           <TabsTrigger value="charters" className="text-xs flex items-center gap-1">
             <Crown className="w-3 h-3" /> Charters
+          </TabsTrigger>
+          <TabsTrigger value="autoassign" className="text-xs flex items-center gap-1">
+            <Zap className="w-3 h-3" /> Auto-Assign
           </TabsTrigger>
         </TabsList>
 
@@ -310,6 +318,10 @@ export function AdminView() {
               </>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="autoassign" className="mt-3 space-y-3">
+          <AutoAssignPanel />
         </TabsContent>
       </Tabs>
     </div>
@@ -667,6 +679,235 @@ function Stat({ label, value, icon, highlight }: {
         {label}
       </div>
       <div className={cn('font-semibold tabular-nums', highlight && 'text-amber-700')}>{value}</div>
+    </div>
+  );
+}
+
+function AutoAssignPanel() {
+  const cabs = useFeederStore(s => s.cabs);
+  const bookings = useFeederStore(s => s.bookings);
+  const autoAssign = useFeederStore(s => s.autoAssign);
+  const { toast } = useToast();
+  const [result, setResult] = useState<{ assigned: number; unassigned: number; details: string[] } | null>(null);
+  const [selectedTrain, setSelectedTrain] = useState(TRAINS_BY_DIR.inbound[1].id);
+
+  const unassigned = bookings.filter(b => !b.cabId && b.status !== 'cancelled');
+  const train = TRAINS.find(t => t.id === selectedTrain)!;
+  const trainCabs = cabs.filter(c => c.trainId === selectedTrain && c.status === 'filling' && !c.charterLocked);
+
+  // Driver fairness metrics
+  const driverLoad = useMemo(() => {
+    return cabs
+      .filter(c => c.trainId === selectedTrain)
+      .map(cab => {
+        const cabBookings = bookings.filter(b => b.cabId === cab.id && b.status !== 'cancelled');
+        const seats = cabBookings.reduce((s, b) => s + b.seatsReserved, 0);
+        return {
+          driver: cab.driverName,
+          plate: cab.plateNumber,
+          cabType: cab.cabType,
+          capacity: cab.capacity,
+          booked: seats,
+          fillPct: cab.capacity > 0 ? seats / cab.capacity : 0,
+          bookingCount: cabBookings.length,
+          rating: cab.driverRating,
+        };
+      })
+      .sort((a, b) => b.fillPct - a.fillPct);
+  }, [cabs, bookings, selectedTrain]);
+
+  function handleAutoAssign() {
+    const res = autoAssign(selectedTrain);
+    setResult(res);
+    toast({
+      title: `Auto-assignment complete`,
+      description: `${res.assigned} booking${res.assigned !== 1 ? 's' : ''} assigned${res.unassigned > 0 ? `, ${res.unassigned} could not be placed` : ''}`,
+      variant: res.unassigned > 0 ? 'destructive' : 'default',
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* How it works */}
+      <Card className="border-primary/30 bg-primary/5">
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <Zap className="w-4 h-4 text-primary" /> Auto-Allocation Engine
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The system automatically assigns unassigned bookings to available cabs using a fairness-aware algorithm.
+            Emptier cabs driven by drivers who haven't been assigned recently (and have good ratings) get priority —
+            so no single driver dominates demand.
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-[10px]">
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">Load balancing</div>
+              <div className="text-muted-foreground">Emptier cabs filled first</div>
+            </div>
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">Recency penalty</div>
+              <div className="text-muted-foreground">Just-assigned drivers wait</div>
+            </div>
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">Rating bonus</div>
+              <div className="text-muted-foreground">Small edge for top drivers</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Train selector */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+          <TrainIcon className="w-3.5 h-3.5" /> Run auto-assignment for
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {TRAINS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => { setSelectedTrain(t.id); setResult(null); }}
+              className={cn(
+                'flex-1 min-w-[120px] text-left px-3 py-2 rounded-xl border transition-all',
+                selectedTrain === t.id
+                  ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                  : 'bg-card hover:bg-accent border-border',
+              )}
+            >
+              <div className="text-[10px] uppercase tracking-wide opacity-70">
+                {t.direction === 'inbound' ? 'Departs' : 'Arrives'}
+              </div>
+              <div className="text-lg font-semibold tabular-nums leading-tight">{t.time}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Unassigned bookings for this train */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Users className="w-4 h-4" /> Unassigned bookings
+            </span>
+            <Badge variant="secondary" className="text-[10px]">{unassigned.length} pending</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-1.5">
+          {unassigned.length === 0 && (
+            <div className="text-center text-sm text-muted-foreground py-4">
+              <CheckCircle2 className="w-6 h-6 mx-auto mb-1 text-emerald-500" />
+              All bookings assigned!
+            </div>
+          )}
+          {unassigned.map(b => {
+            const stage = STAGES.find(s => s.id === b.stageId);
+            return (
+              <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/40 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{b.passengerName}</div>
+                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <MapPin className="w-2.5 h-2.5" /> {stage?.name ?? b.pickupPoint}
+                    {b.vehicleTypePreference && (
+                      <span className="text-muted-foreground/50">·</span>
+                    )}
+                    {b.vehicleTypePreference && <span>Prefers {b.vehicleTypePreference}</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Badge variant="secondary" className="text-[9px] h-4">{b.seatsReserved} seat{b.seatsReserved > 1 ? 's' : ''}</Badge>
+                  <span className="text-[10px] font-medium tabular-nums">KSh {b.farePaid}</span>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* Run button */}
+      <Button
+        className="w-full h-12"
+        onClick={handleAutoAssign}
+        disabled={unassigned.length === 0 || trainCabs.length === 0}
+      >
+        <Zap className="w-4 h-4 mr-1.5" />
+        Run auto-assignment for {train.time} {train.direction === 'inbound' ? 'departure' : 'arrival'}
+      </Button>
+      {(unassigned.length === 0 || trainCabs.length === 0) && (
+        <p className="text-[11px] text-center text-muted-foreground">
+          {unassigned.length === 0
+            ? 'No unassigned bookings to allocate.'
+            : `No available cabs for this train.`}
+        </p>
+      )}
+
+      {/* Results */}
+      {result && (
+        <Card className={cn(result.unassigned > 0 ? 'border-amber-300' : 'border-emerald-300')}>
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {result.unassigned > 0 ? (
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              )}
+              {result.assigned} assigned
+              {result.unassigned > 0 && `, ${result.unassigned} unplaced`}
+            </div>
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {result.details.map((d, i) => (
+                <div key={i} className="text-[11px] font-mono leading-relaxed">
+                  {d}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Driver fairness dashboard */}
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium flex items-center gap-1.5">
+          <TrendingUp className="w-4 h-4" /> Driver load distribution
+        </h4>
+        <p className="text-[11px] text-muted-foreground">
+          Fairness check — each driver's current load for this train. The algorithm balances these.
+        </p>
+        {driverLoad.map(d => (
+          <Card key={d.plate}>
+            <CardContent className="p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{d.driver}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {d.cabType} · {d.plate} · ★ {d.rating.toFixed(1)}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-bold tabular-nums">{d.booked}/{d.capacity}</div>
+                  <div className="text-[10px] text-muted-foreground">{d.bookingCount} booking{d.bookingCount !== 1 ? 's' : ''}</div>
+                </div>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all',
+                    d.fillPct >= 0.9 ? 'bg-emerald-500' :
+                    d.fillPct >= 0.5 ? 'bg-amber-500' : 'bg-primary',
+                  )}
+                  style={{ width: `${d.fillPct * 100}%` }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {driverLoad.length === 0 && (
+          <Card>
+            <CardContent className="py-6 text-center text-sm text-muted-foreground">
+              No cabs for this train.
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
