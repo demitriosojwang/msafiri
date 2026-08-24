@@ -174,3 +174,58 @@ Stage Summary:
 - Available cabs filter automatically based on seat availability — a cab with 2 seats left won't show when you need 3.
 - Driver manifest shows seat count per passenger so drivers know how many people to expect at each pickup.
 - Files modified: `src/lib/feeder/seed.ts`, `src/lib/feeder/calc.ts`, `src/store/feeder-store.ts`, `src/components/feeder/{DatePicker,SeatStepper,PassengerView,BookingSheet,DriverView}.tsx`.
+
+---
+Task ID: 6
+Agent: main
+Task: Add auto-allocation engine + hide admin panel from passengers/drivers.
+
+Work Log:
+- Made Booking.cabId optional (null = pending auto-assignment).
+- Added vehicleTypePreference and assignedAt fields to Booking type.
+- Created 6 unassigned bookings in seed data (passengers who booked vehicle type but no specific cab).
+- Implemented autoAssign algorithm in store:
+  • Gathers unassigned bookings for a train
+  • Sorts by seatsRequested DESC (pack big groups first)
+  • Scores each cab: currentLoad + (recentAssignments × 2) - (rating × 0.5)
+  • Assigns to lowest-scoring cab with enough remaining seats
+  • Tracks per-driver assignment count for recency penalty
+  • Returns { assigned, unassigned, details[] } with human-readable log
+- Added Auto-Assign tab to admin view with:
+  • How-it-works explainer card
+  • Train selector (all 6 trains)
+  • Unassigned bookings list with vehicle type preferences
+  • "Run auto-assignment" button
+  • Results card with per-booking assignment log
+  • Driver load distribution dashboard with fill bars
+- Updated admin metrics: replaced "Pending requests" with "Unassigned bookings"
+- Hidden admin from role switcher:
+  • Role switcher now shows only Passenger/Driver (2 columns)
+  • Admin access via #admin URL hash (opens password prompt)
+  • Admin access via long-press logo (1.5 seconds)
+  • Access code: msafiri2026 (prototype only — production would use email+password+2FA on separate subdomain)
+  • "Exit admin" button in header when in admin mode
+  • Header subtitle changes to "Admin Console" in admin mode
+- Ran ESLint — clean (fixed set-state-in-effect warning with queueMicrotask).
+- Verified with agent-browser:
+  • Passenger view shows only Passenger/Driver toggle (no Admin)
+  • Visiting #admin opens access code prompt
+  • Entering correct code enters admin mode
+  • Auto-Assign tab shows 6 unassigned bookings
+  • Clicking "Run auto-assignment" assigns all 6 with fairness:
+    - Susan (3 seats) → Fatuma's 4-seater (emptiest)
+    - Amina (2 seats) → Mwangi's 4-seater
+    - John (2 seats) → Amani's 7-seater
+    - Peter (1 seat) → Joseph's 11-seater
+    - Grace (1 seat) → Halima's 14-seater
+    - Mary (1 seat) → Joseph's 11-seater (recency penalty applied)
+  • "All bookings assigned!" after run
+  • Driver load distribution shows balanced fill bars
+  • No console errors
+- Committed and pushed to GitHub.
+
+Stage Summary:
+- Auto-allocation engine is fully functional with fairness-aware bin-packing.
+- Admin panel is invisible to passengers/drivers — accessible only via #admin URL or long-press logo + access code.
+- The direction for production is documented: separate subdomain (admin.msafiri.co.ke), email+password+2FA, server-side RBAC, no admin references in passenger/driver code.
+- Files: src/lib/feeder/{types,seed}.ts, src/store/feeder-store.ts, src/components/feeder/{AdminView,FeederApp}.tsx
