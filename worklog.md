@@ -229,3 +229,48 @@ Stage Summary:
 - Admin panel is invisible to passengers/drivers — accessible only via #admin URL or long-press logo + access code.
 - The direction for production is documented: separate subdomain (admin.msafiri.co.ke), email+password+2FA, server-side RBAC, no admin references in passenger/driver code.
 - Files: src/lib/feeder/{types,seed}.ts, src/store/feeder-store.ts, src/components/feeder/{AdminView,FeederApp}.tsx
+
+---
+Task ID: 7
+Agent: main
+Task: Rebrand to msafiri + real train schedule + drop-off labels for return trips.
+
+Work Log:
+- Used VLM to extract the train schedule from the uploaded screenshot:
+  * MTM departures: Inter-County 08:00, Express 15:00, Night Train 22:00
+  * NTM arrivals: Inter-County 14:00, Express 20:30, Night Train 03:55
+- Used VLM to analyze the msafiri logo: navy (#0B1D35) + sunset orange (#F26522), with M monogram, location pin, car + train, and "msafiri" wordmark with "RIDE • CONNECT • JOURNEY" tagline.
+- Copied logo to public/msafiri-logo.png.
+- Updated color theme in globals.css from terracotta to msafiri Kenya coast palette:
+  * Primary: deep navy (oklch 0.25 0.06 255) — Indian Ocean / logo primary
+  * Accent: sunset orange (oklch 0.68 0.18 45) — Kenya coast warmth / logo accent
+  * Updated all chart colors, sidebar, dark mode to match
+- Updated train schedule in seed.ts with real train names (Inter-County, Express, Night Train) and correct times.
+- Rebranded all UI text from "SGR Feeder" to "msafiri":
+  * Header: logo image + "msafiri" wordmark
+  * Footer: "msafiri · interactive prototype"
+  * About sheet: "msafiri — about"
+  * Page title and metadata in layout.tsx
+  * Favicon set to logo
+- Replaced train icon in header with the msafiri logo image (9x9 rounded).
+- Added drop-off vs pickup distinction:
+  * Created pointLabel variable ("pickup" for inbound, "drop-off" for outbound)
+  * Stage picker heading: "Pickup stage" / "Drop-off stage"
+  * Options card: "Pickup options" / "Drop-off options"
+  * Booking sheet: "Pickup stage" / "Drop-off stage", "Pickup near" / "Drop-off near"
+  * Input label: "Specific pickup point" / "Specific drop-off point"
+  * Fare explanation: "stage pickup" / "stage drop-off", "off-stage pickup" / "off-stage drop-off"
+- Ran ESLint — clean.
+- Verified with agent-browser:
+  * Logo image loads (naturalWidth 1402px)
+  * Inbound view shows "Pickup stage", "Pickup options", train names (Inter-County/Express/Night Train)
+  * Outbound view shows "Drop-off stage", "Drop-off options", arrival times (14:00/20:30/03:55)
+  * Booking sheet for outbound shows "Drop-off stage" and "Specific drop-off point"
+  * No console errors
+- Committed and pushed to GitHub.
+
+Stage Summary:
+- Platform is now "msafiri" with the user's logo and Kenya coast navy+orange theme.
+- Real Kenya Railways train schedule with proper train names (Inter-County, Express, Night Train).
+- Return trips correctly show "drop-off" labels everywhere instead of "pickup".
+- Logo is used as the favicon and in the header.
