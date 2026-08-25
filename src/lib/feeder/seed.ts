@@ -46,17 +46,19 @@ export const STAGES: Stage[] = [
   { id: 's-malindi',       name: 'Malindi',                 area: 'Malindi', coast: 'north', travelMin: 120, peakAdjustMin: 30, landmark: 'Malindi town (location TBD)' },
 ];
 
-// Trains — Madaraka Express
+// Trains — Madaraka Express (real schedule from Kenya Railways)
+// MTM = Mombasa Terminus to Nairobi (departures)
+// NTM = Nairobi Terminus to Mombasa (arrivals at Mombasa)
 export const TRAINS: Train[] = [
-  // Departures (Mombasa → Nairobi) — inbound passengers catching these
-  { id: 't-dep-1', code: 'Madaraka Express', time: '08:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
-  { id: 't-dep-2', code: 'Madaraka Express', time: '15:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
-  { id: 't-dep-3', code: 'Madaraka Express', time: '22:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+  // MTM departures — passengers heading TO the terminus to catch these
+  { id: 't-dep-1', code: 'Inter-County', time: '08:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+  { id: 't-dep-2', code: 'Express',      time: '15:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
+  { id: 't-dep-3', code: 'Night Train',  time: '22:00', direction: 'inbound',  origin: 'Mombasa Terminus', destination: 'Nairobi' },
 
-  // Arrivals (Nairobi → Mombasa) — outbound passengers offboarding
-  { id: 't-arr-1', code: 'Madaraka Express', time: '04:00', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
-  { id: 't-arr-2', code: 'Madaraka Express', time: '14:00', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
-  { id: 't-arr-3', code: 'Madaraka Express', time: '20:30', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
+  // NTM arrivals — passengers OFFBOARDING at Mombasa, connecting to cabs home
+  { id: 't-arr-1', code: 'Inter-County', time: '14:00', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
+  { id: 't-arr-2', code: 'Express',      time: '20:30', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
+  { id: 't-arr-3', code: 'Night Train',  time: '03:55', direction: 'outbound', origin: 'Nairobi', destination: 'Mombasa Terminus' },
 ];
 
 export const TRAINS_BY_DIR = {

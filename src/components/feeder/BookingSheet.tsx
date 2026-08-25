@@ -168,7 +168,9 @@ export function BookingSheet({ cab, open, onOpenChange }: {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="rounded-lg bg-secondary/60 p-3">
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground mb-1">
-                  <MapPin className="w-3 h-3" /> {pickupKind === 'stage' ? 'Stage' : 'Pickup near'}
+                  <MapPin className="w-3 h-3" /> {pickupKind === 'stage'
+                    ? (cab.direction === 'inbound' ? 'Pickup stage' : 'Drop-off stage')
+                    : (cab.direction === 'inbound' ? 'Pickup near' : 'Drop-off near')}
                 </div>
                 <div className="font-medium">{stage.name}</div>
                 <div className="text-xs text-muted-foreground">{stage.area} · {stage.coast === 'south' ? 'South' : 'North'} Coast</div>
@@ -251,7 +253,9 @@ export function BookingSheet({ cab, open, onOpenChange }: {
               <div className="space-y-1.5">
                 <Label htmlFor="p-pickup" className="text-xs flex items-center gap-1">
                   <MapPin className="w-3 h-3" />
-                  {pickupKind === 'stage' ? 'Stage landmark (optional)' : 'Specific pickup point'}
+                  {pickupKind === 'stage'
+                    ? 'Stage landmark (optional)'
+                    : (cab.direction === 'inbound' ? 'Specific pickup point' : 'Specific drop-off point')}
                 </Label>
                 <Input
                   id="p-pickup"

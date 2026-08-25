@@ -87,16 +87,16 @@ export function FeederApp() {
         <div className="mx-auto max-w-md px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div
-              className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground select-none"
+              className="w-9 h-9 rounded-lg overflow-hidden select-none cursor-pointer hover:opacity-90 transition-opacity"
               onPointerDown={handleLogoPressStart}
               onPointerUp={handleLogoPressEnd}
               onPointerLeave={handleLogoPressEnd}
-              title="SGR Feeder"
+              title="msafiri"
             >
-              <TrainIcon className="w-4 h-4" />
+              <img src="/msafiri-logo.png" alt="msafiri" className="w-full h-full object-cover" />
             </div>
             <div className="leading-tight">
-              <div className="font-semibold text-sm">SGR Feeder</div>
+              <div className="font-semibold text-sm tracking-tight">msafiri</div>
               <div className="text-[10px] text-muted-foreground -mt-0.5">
                 {role === 'admin' ? 'Admin Console' : 'Mombasa Terminus'}
               </div>
@@ -173,7 +173,7 @@ export function FeederApp() {
       {/* Footer */}
       <footer className="mt-auto border-t bg-background/95 backdrop-blur">
         <div className="mx-auto max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground">
-          SGR Feeder · interactive prototype · data is simulated
+          msafiri · interactive prototype · data is simulated
         </div>
       </footer>
 
@@ -238,7 +238,7 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="text-xl">SGR Feeder — about</SheetTitle>
+          <SheetTitle className="text-xl">msafiri — about</SheetTitle>
           <SheetDescription>
             An end-to-end prototype covering passenger booking, driver dispatch, and admin monitoring
             of cab–passenger connections at the Mombasa Terminus.

@@ -66,6 +66,10 @@ export function PassengerView() {
   const trains = direction === 'inbound' ? TRAINS_BY_DIR.inbound : TRAINS_BY_DIR.outbound;
   const selectedTrain = trains.find(t => t.id === selectedTrainId) ?? trains[0];
 
+  // For outbound (from terminus), stages are drop-off points, not pickup points
+  const pointLabel = direction === 'inbound' ? 'pickup' : 'drop-off';
+  const pointLabelCap = direction === 'inbound' ? 'Pickup' : 'Drop-off';
+
   // Group stages by area for the picker
   const stagesByArea = useMemo(() => {
     const map = new Map<string, Stage[]>();
@@ -169,7 +173,7 @@ export function PassengerView() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
-                <MapPin className="w-3.5 h-3.5" /> Pickup stage
+                <MapPin className="w-3.5 h-3.5" /> {pointLabelCap} stage
               </div>
               {selectedStageId && (
                 <button
@@ -231,7 +235,7 @@ export function PassengerView() {
           <Card className="border-primary/30 bg-primary/5">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-1.5">
-                <Car className="w-4 h-4" /> Pickup options
+                <Car className="w-4 h-4" /> {pointLabelCap} options
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 pt-0">
@@ -435,8 +439,8 @@ export function PassengerView() {
               </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground space-y-1.5 pt-0">
-              <p>Drivers use the existing SGR waiting/collection points as stages. Pick one to see cabs positioned there. Each cab is tied to a specific train and fills up digitally ahead of time.</p>
-              <p>Base fare is <span className="font-medium text-foreground">KSh {settings.baseFareStage}</span> for stage pickup. Off-stage pickup adds <span className="font-medium text-foreground">KSh {settings.offStageSurchargePerKm}/km</span> beyond the stage, capped at {settings.offStageMaxRadiusKm} km — beyond that, please meet at the nearest stage.</p>
+              <p>Drivers use the existing SGR waiting/collection points as stages. {direction === 'inbound' ? 'Pick one to see cabs positioned there for pickup.' : 'Pick one to see cabs that will drop you off there.'} Each cab is tied to a specific train and fills up digitally ahead of time.</p>
+              <p>Base fare is <span className="font-medium text-foreground">KSh {settings.baseFareStage}</span> for stage {pointLabel}. Off-stage {pointLabel} adds <span className="font-medium text-foreground">KSh {settings.offStageSurchargePerKm}/km</span> beyond the stage, capped at {settings.offStageMaxRadiusKm} km — beyond that, please meet at the nearest stage.</p>
               <p>Private charter = book the whole vehicle. Driver commits to skipping pooling for this run, and you pay the full-vehicle fare.</p>
             </CardContent>
           </Card>

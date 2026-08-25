@@ -14,13 +14,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SGR Feeder — Mombasa Terminus",
-  description: "Book a seat in a cab heading to or from the SGR Mombasa Terminus. Converts the informal 'wait until full' stage mechanic into digital fill-up, with reverse-engineered trip timing.",
-  keywords: ["SGR", "Mombasa", "Feeder", "Cab", "Kenya", "Transport"],
-  authors: [{ name: "SGR Feeder Prototype" }],
+  title: "msafiri — Mombasa Terminus",
+  description: "Book a cab to or from the Mombasa SGR Terminus. msafiri connects passengers with shared and private cab services along the Kenya coast.",
+  keywords: ["msafiri", "SGR", "Mombasa", "Cab", "Kenya", "Transport", "Kenya Coast"],
+  authors: [{ name: "msafiri" }],
+  icons: {
+    icon: "/msafiri-logo.png",
+    apple: "/msafiri-logo.png",
+  },
   openGraph: {
-    title: "SGR Feeder — Mombasa Terminus",
-    description: "Book a cab to/from the SGR terminus. Digital fill-up, reverse-engineered leave times.",
+    title: "msafiri — Mombasa Terminus",
+    description: "Book a cab to or from the SGR terminus. Shared rides, private charters, Kenya coast.",
     type: "website",
   },
 };
