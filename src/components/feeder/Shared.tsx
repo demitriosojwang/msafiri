@@ -4,19 +4,19 @@ import { cn } from '@/lib/utils';
 import type { CabStatus, BookingKind } from '@/lib/feeder/types';
 
 export function StatusBadge({ status }: { status: CabStatus }) {
-  const map: Record<CabStatus, { label: string; cls: string }> = {
-    filling: { label: 'Filling', cls: 'bg-amber-100 text-amber-900 border-amber-200' },
-    locked: { label: 'Locked', cls: 'bg-emerald-100 text-emerald-900 border-emerald-200' },
-    departed: { label: 'Departed', cls: 'bg-sky-100 text-sky-900 border-sky-200' },
-    arrived: { label: 'Arrived', cls: 'bg-violet-100 text-violet-900 border-violet-200' },
+  const map: Record<CabStatus, { label: string; cls: string; dotCls: string }> = {
+    filling: { label: 'Filling', cls: 'bg-accent/15 text-accent border-accent/30', dotCls: 'bg-accent msafiri-live-dot' },
+    locked: { label: 'Locked', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', dotCls: 'bg-emerald-500' },
+    departed: { label: 'Departed', cls: 'bg-sky-100 text-sky-800 border-sky-200', dotCls: 'bg-sky-500' },
+    arrived: { label: 'Arrived', cls: 'bg-violet-100 text-violet-800 border-violet-200', dotCls: 'bg-violet-500' },
   };
   const s = map[status];
   return (
     <span className={cn(
-      'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border',
+      'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border',
       s.cls,
     )}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+      <span className={cn('w-1.5 h-1.5 rounded-full', s.dotCls)} />
       {s.label}
     </span>
   );
@@ -89,17 +89,23 @@ export function TrainPill({ code, time, active, onClick, direction }: {
     <button
       onClick={onClick}
       className={cn(
-        'flex-1 min-w-[110px] text-left px-3 py-2 rounded-xl border transition-all',
+        'flex-1 min-w-[110px] text-left px-3.5 py-2.5 rounded-2xl border transition-all duration-200',
         active
-          ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-          : 'bg-card hover:bg-accent border-border',
+          ? 'msafiri-pill-active'
+          : 'bg-card hover:bg-accent/10 border-border hover:border-accent/30 hover:shadow-sm',
       )}
     >
-      <div className="text-[10px] uppercase tracking-wide opacity-70">
+      <div className={cn(
+        'text-[9px] uppercase tracking-wider font-medium',
+        active ? 'opacity-80' : 'text-muted-foreground',
+      )}>
         {direction === 'outbound' ? 'Arrives' : 'Departs'}
       </div>
-      <div className="text-lg font-semibold tabular-nums leading-tight">{time}</div>
-      <div className="text-[10px] opacity-70 truncate">{code}</div>
+      <div className="text-xl font-bold tabular-nums leading-tight mt-0.5">{time}</div>
+      <div className={cn(
+        'text-[10px] truncate mt-0.5',
+        active ? 'opacity-80' : 'text-muted-foreground',
+      )}>{code}</div>
     </button>
   );
 }

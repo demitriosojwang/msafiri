@@ -15,6 +15,7 @@ import { useFeederStore } from '@/store/feeder-store';
 import { PassengerView } from './PassengerView';
 import { DriverView } from './DriverView';
 import { AdminView } from './AdminView';
+import { SplashScreen } from './SplashScreen';
 import {
   Train as TrainIcon,
   User,
@@ -36,6 +37,7 @@ const ADMIN_ACCESS_CODE = 'msafiri2026';
 export function FeederApp() {
   const role = useFeederStore(s => s.role);
   const setRole = useFeederStore(s => s.setRole);
+  const [showSplash, setShowSplash] = useState(true);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [adminPromptOpen, setAdminPromptOpen] = useState(false);
   const [adminCode, setAdminCode] = useState('');
@@ -82,12 +84,15 @@ export function FeederApp() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      {/* Splash screen — shows on launch */}
+      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
+
       {/* Top bar */}
-      <header className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b">
+      <header className="sticky top-0 z-30 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75 border-b border-border/60">
         <div className="mx-auto max-w-md px-4 py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div
-              className="w-9 h-9 rounded-lg overflow-hidden select-none cursor-pointer hover:opacity-90 transition-opacity"
+              className="w-10 h-10 rounded-xl overflow-hidden select-none cursor-pointer hover:scale-105 transition-transform shadow-sm"
               onPointerDown={handleLogoPressStart}
               onPointerUp={handleLogoPressEnd}
               onPointerLeave={handleLogoPressEnd}
@@ -96,8 +101,8 @@ export function FeederApp() {
               <img src="/msafiri-logo.png" alt="msafiri" className="w-full h-full object-cover" />
             </div>
             <div className="leading-tight">
-              <div className="font-semibold text-sm tracking-tight">msafiri</div>
-              <div className="text-[10px] text-muted-foreground -mt-0.5">
+              <div className="font-bold text-base tracking-tight text-foreground">msafiri</div>
+              <div className="text-[10px] text-muted-foreground -mt-0.5 tracking-wide">
                 {role === 'admin' ? 'Admin Console' : 'Mombasa Terminus'}
               </div>
             </div>
@@ -123,9 +128,9 @@ export function FeederApp() {
         {/* Role switcher — Passenger/Driver only (admin hidden) */}
         {role !== 'admin' && (
           <div className="mx-auto max-w-md px-4 pb-2.5">
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-secondary/60">
-              <RoleButton active={role === 'passenger'} onClick={() => setRole('passenger')} icon={<User className="w-3.5 h-3.5" />} label="Passenger" />
-              <RoleButton active={role === 'driver'} onClick={() => setRole('driver')} icon={<Car className="w-3.5 h-3.5" />} label="Driver" />
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-secondary/50 backdrop-blur-sm">
+              <RoleButton active={role === 'passenger'} onClick={() => setRole('passenger')} icon={<User className="w-4 h-4" />} label="Passenger" />
+              <RoleButton active={role === 'driver'} onClick={() => setRole('driver')} icon={<Car className="w-4 h-4" />} label="Driver" />
             </div>
           </div>
         )}
@@ -223,8 +228,10 @@ function RoleButton({ active, onClick, icon, label }: {
     <button
       onClick={onClick}
       className={cn(
-        'flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium transition-all',
-        active ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground',
+        'flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold transition-all duration-200',
+        active
+          ? 'msafiri-pill-active'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent/10',
       )}
     >
       {icon} {label}
