@@ -274,3 +274,62 @@ Stage Summary:
 - Real Kenya Railways train schedule with proper train names (Inter-County, Express, Night Train).
 - Return trips correctly show "drop-off" labels everywhere instead of "pickup".
 - Logo is used as the favicon and in the header.
+
+---
+Task ID: 8
+Agent: main
+Task: Polish layout + splash screen with logo on launch.
+
+Work Log:
+- Refined the Kenya coast color palette for better harmony:
+  * Background: warm cream (oklch 0.98 0.008 75) — sand-toned, not cold
+  * Primary: richer navy (oklch 0.28 0.07 258) — Indian Ocean depth
+  * Accent: vibrant sunset orange (oklch 0.67 0.19 42)
+  * Added subtle radial gradient backdrop on body (coastal sky feel)
+  * Harmonized all chart colors with the navy+orange base
+- Added custom CSS utility classes in globals.css:
+  * .msafiri-card — soft 2-layer shadow + hover lift
+  * .msafiri-pill-active — navy gradient for selected pills
+  * .msafiri-live-dot — pulsing animation for live indicators
+  * .msafiri-accent-bar — navy→orange gradient bar
+  * Splash/shimmer/fade-up keyframe animations
+- Built SplashScreen component:
+  * Full-screen navy gradient with orange sunset glow at top
+  * Logo bounce-in animation (cubic-bezier overshoot)
+  * 'msafiri' wordmark in white, bold
+  * 'Ride · Connect · Journey' tagline with wide letter-spacing
+  * Shimmer loading bar (orange sweep)
+  * 'Mombasa Terminus · Kenya Coast' footer
+  * Auto-dismisses after 2.2s with fade-out animation
+- Polished header:
+  * Larger logo (10x10 rounded-xl with shadow)
+  * Hover scale effect on logo
+  * Bolder wordmark (text-base, font-bold)
+  * Wider letter-spacing on subtitle
+  * backdrop-blur-md for glass effect
+- Polished role switcher:
+  * Rounded-2xl container
+  * Active button uses msafiri-pill-active (navy gradient)
+  * Inactive buttons have hover states (accent tint)
+  * Larger icons (w-4 h-4)
+- Polished train picker pills:
+  * Rounded-2xl, larger padding
+  * Active = navy gradient with shadow
+  * Inactive = hover accent tint + border highlight
+  * Bolder time text (text-xl font-bold)
+- Updated StatusBadge:
+  * 'Filling' uses orange tint with pulsing dot (msafiri-live-dot)
+  * Other statuses use softer colors
+- Ran ESLint — clean.
+- Verified with agent-browser:
+  * Splash screen shows on launch with logo, wordmark, tagline, shimmer
+  * Splash auto-dismisses after ~2.5s
+  * Main UI loads with polished theme
+  * No console errors
+- Committed and pushed to GitHub.
+
+Stage Summary:
+- Platform now launches with a branded splash screen (logo pop-up + tagline + shimmer).
+- Layout is visually polished: soft shadows, gradient pills, warm cream background, harmonized navy+orange theme.
+- All interactive elements have smooth hover/active transitions.
+- Live indicators (Filling status) pulse to draw attention.
