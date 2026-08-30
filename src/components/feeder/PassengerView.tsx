@@ -16,6 +16,7 @@ import { useFeederStore } from '@/store/feeder-store';
 import { SeatMeter, Stars, StatusBadge, TrainPill, CharterBadge } from './Shared';
 import { LeaveCountdownBadge } from './TripTiming';
 import { BookingSheet } from './BookingSheet';
+import { PassengerLiveTracking } from './PassengerLiveTracking';
 import { DatePicker } from './DatePicker';
 import { SeatStepper } from './SeatStepper';
 import {
@@ -446,6 +447,11 @@ export function PassengerView() {
           </Card>
         </motion.div>
       </AnimatePresence>
+
+      {/* Live tracking — show for the first assigned booking */}
+      {myBookings.length > 0 && myBookings[0].cabId && (
+        <PassengerLiveTracking cabId={myBookings[0].cabId} />
+      )}
 
       {/* My bookings */}
       {myBookings.length > 0 && (

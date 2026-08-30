@@ -22,6 +22,7 @@ import {
 import { useFeederStore } from '@/store/feeder-store';
 import { TripTimingTimeline, LeaveCountdownBadge } from './TripTiming';
 import { Stars, StatusBadge, CharterBadge, BookingKindBadge } from './Shared';
+import { DriverLiveTracking } from './DriverLiveTracking';
 import {
   Wallet,
   Users,
@@ -359,6 +360,9 @@ export function DriverView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Live GPS tracking — shows waiting passengers + live position when en route */}
+      <DriverLiveTracking cabId={inboundCab.id} />
 
       {/* Charter requests — shown ONLY if driver can accept (no pooled passengers) */}
       {!isCharterLocked && charterCheck.allowed && charterRequests.length > 0 && (

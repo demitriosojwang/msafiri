@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,12 +10,12 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
-import { Input } from '@/components/ui/input';
 import { useFeederStore } from '@/store/feeder-store';
 import { PassengerView } from './PassengerView';
 import { DriverView } from './DriverView';
 import { AdminView } from './AdminView';
 import { SplashScreen } from './SplashScreen';
+import { LoginScreen } from './LoginScreen';
 import {
   Train as TrainIcon,
   User,
@@ -30,56 +30,21 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Admin access code — in production this would be a full auth flow with email+password+2FA.
-// For the prototype, long-press the logo or visit #admin and enter this code.
-const ADMIN_ACCESS_CODE = 'msafiri2026';
-
 export function FeederApp() {
   const role = useFeederStore(s => s.role);
+  const session = useFeederStore(s => s.session);
   const setRole = useFeederStore(s => s.setRole);
+  const logout = useFeederStore(s => s.logout);
   const [showSplash, setShowSplash] = useState(true);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [adminPromptOpen, setAdminPromptOpen] = useState(false);
-  const [adminCode, setAdminCode] = useState('');
-  const [adminError, setAdminError] = useState(false);
-  const logoPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Check URL hash for #admin on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.hash === '#admin') {
-      queueMicrotask(() => setAdminPromptOpen(true));
-    }
-  }, []);
-
-  function handleLogoPressStart() {
-    logoPressTimer.current = setTimeout(() => {
-      setAdminPromptOpen(true);
-    }, 1500); // long press for 1.5s
-  }
-
-  function handleLogoPressEnd() {
-    if (logoPressTimer.current) {
-      clearTimeout(logoPressTimer.current);
-      logoPressTimer.current = null;
-    }
-  }
-
-  function handleAdminSubmit() {
-    if (adminCode === ADMIN_ACCESS_CODE) {
-      setRole('admin');
-      setAdminPromptOpen(false);
-      setAdminCode('');
-      setAdminError(false);
-      if (typeof window !== 'undefined') {
-        window.location.hash = '';
-      }
-    } else {
-      setAdminError(true);
-    }
-  }
 
   function exitAdmin() {
-    setRole('passenger');
+    logout();
+  }
+
+  // If splash is done and no session, show login screen
+  if (!showSplash && !session) {
+    return <LoginScreen />;
   }
 
   return (
@@ -92,10 +57,7 @@ export function FeederApp() {
         <div className="mx-auto max-w-md px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div
-              className="w-10 h-10 rounded-xl overflow-hidden select-none cursor-pointer hover:scale-105 transition-transform shadow-sm"
-              onPointerDown={handleLogoPressStart}
-              onPointerUp={handleLogoPressEnd}
-              onPointerLeave={handleLogoPressEnd}
+              className="w-10 h-10 rounded-xl overflow-hidden select-none hover:scale-105 transition-transform shadow-sm"
               title="msafiri"
             >
               <img src="/msafiri-logo.png" alt="msafiri" className="w-full h-full object-cover" />
@@ -107,26 +69,47 @@ export function FeederApp() {
               </div>
             </div>
           </div>
-          {role === 'admin' ? (
-            <button
-              onClick={exitAdmin}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            >
-              <X className="w-3.5 h-3.5" /> Exit admin
-            </button>
-          ) : (
-            <button
-              onClick={() => setAboutOpen(true)}
-              className="p-2 rounded-lg hover:bg-accent text-muted-foreground"
-              aria-label="About"
-            >
-              <Info className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {session && session.roles.length > 1 && (
+              <button
+                onClick={() => {
+                  const otherRole = session.activeRole === 'driver' ? 'passenger' : 'driver';
+                  setRole(otherRole);
+                }}
+                className="text-[10px] px-2 py-1 rounded-full bg-secondary text-muted-foreground hover:text-foreground"
+              >
+                Switch to {session.activeRole === 'driver' ? 'Passenger' : 'Driver'}
+              </button>
+            )}
+            {role === 'admin' ? (
+              <button
+                onClick={exitAdmin}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                <X className="w-3.5 h-3.5" /> Exit
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setAboutOpen(true)}
+                  className="p-2 rounded-lg hover:bg-accent text-muted-foreground"
+                  aria-label="About"
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={logout}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  Logout
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Role switcher — Passenger/Driver only (admin hidden) */}
-        {role !== 'admin' && (
+        {role !== 'admin' && session && (
           <div className="mx-auto max-w-md px-4 pb-2.5">
             <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-secondary/50 backdrop-blur-sm">
               <RoleButton active={role === 'passenger'} onClick={() => setRole('passenger')} icon={<User className="w-4 h-4" />} label="Passenger" />
@@ -183,40 +166,6 @@ export function FeederApp() {
       </footer>
 
       <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} />
-
-      {/* Admin access prompt — hidden from regular users */}
-      <Sheet open={adminPromptOpen} onOpenChange={setAdminPromptOpen}>
-        <SheetContent side="bottom" className="max-h-[60vh]">
-          <SheetHeader>
-            <SheetTitle className="text-xl flex items-center gap-2">
-              <Lock className="w-5 h-5 text-primary" /> Admin Access
-            </SheetTitle>
-            <SheetDescription>
-              Enter the admin access code to view the operations console.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6 space-y-3">
-            <Input
-              type="password"
-              value={adminCode}
-              onChange={(e) => { setAdminCode(e.target.value); setAdminError(false); }}
-              onKeyDown={(e) => e.key === 'Enter' && handleAdminSubmit()}
-              placeholder="Access code"
-              className={cn('h-11', adminError && 'border-destructive')}
-              autoFocus
-            />
-            {adminError && (
-              <p className="text-xs text-destructive">Incorrect access code. Try again.</p>
-            )}
-            <Button className="w-full h-11" onClick={handleAdminSubmit}>
-              <Shield className="w-4 h-4 mr-1.5" /> Enter admin console
-            </Button>
-            <p className="text-[10px] text-center text-muted-foreground">
-              In production, this would require email + password + 2FA on a separate subdomain.
-            </p>
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

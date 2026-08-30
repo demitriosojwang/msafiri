@@ -37,6 +37,8 @@ export type Stage = {
   travelMin: number;       // typical travel time from Mombasa Terminus
   peakAdjustMin: number;   // extra minutes during peak hours
   landmark?: string;       // helper description
+  lat: number;             // GPS latitude (for live tracking)
+  lng: number;             // GPS longitude (for live tracking)
 };
 
 // A train — either departing Mombasa or arriving at Mombasa
@@ -156,3 +158,68 @@ export type FareBreakdown = {
   total: number;            // final fare
   capped: boolean;          // true if distance exceeded radius
 };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GPS / Live Tracking
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Live driver position — updated every ~15s while trip is active
+export type DriverPosition = {
+  cabId: string;
+  lat: number;              // simulated latitude
+  lng: number;              // simulated longitude
+  heading: number;          // 0..359 degrees
+  speedKmh: number;         // current speed
+  recordedAt: number;       // epoch ms
+  // Progress along route: 0 = at start stage, 1 = at terminus
+  routeProgress: number;
+};
+
+// Computed ETA for a passenger waiting at a stage
+export type CabETA = {
+  cabId: string;
+  driverName: string;
+  plateNumber: string;
+  cabType: CabType;
+  distanceKm: number;       // straight-line distance to passenger's stage
+  etaMin: number;           // estimated minutes to arrival
+  routeProgress: number;    // 0..1
+  isEnRoute: boolean;       // true if cab has departed for this stage
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AUTH / RBAC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type Role = 'passenger' | 'driver' | 'admin';
+
+// A logged-in session — the backend would issue a JWT with these claims
+export type Session = {
+  userId: string;
+  displayName: string;
+  phone: string;
+  roles: Role[];              // multi-role support (driver who is also a passenger)
+  activeRole: Role;           // currently selected role for UI
+  driverProfileId?: string;   // if has driver role, which cab they drive
+  // Permission checks are server-side; this is the client-side mirror for UX
+  permissions: Permission[];
+  loginAt: number;
+};
+
+// Granular permissions — server enforces these on every endpoint
+export type Permission =
+  | 'booking:create'          // passenger
+  | 'booking:read:own'        // passenger
+  | 'booking:cancel:own'      // passenger
+  | 'trip:read:assigned'      // driver — only their own trips
+  | 'trip:update:status'      // driver — only their own trips
+  | 'location:broadcast'      // driver — send their GPS
+  | 'location:read:assigned'  // driver — see passenger stages on their route
+  | 'admin:read:all'          // admin
+  | 'admin:manage:drivers'    // admin
+  | 'admin:manage:pricing'    // admin
+  | 'admin:refund:payments'   // admin
+  | 'admin:autoassign'        // admin
+  | 'admin:view:audit'        // admin
+  ;
+

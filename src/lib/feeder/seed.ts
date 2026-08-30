@@ -24,27 +24,29 @@ export const SETTINGS: Settings = {
 };
 
 // Stages — the agreed SGR waiting/collection points.
-// South Coast (Likoni area): 3 close-together stages (coverage gap risk noted in source convo)
-// South Coast (Diani area): Kombani + Ukunda
-// North Coast: Bamburi (2 stages), Mtwapa, Malindi (TBD location)
+// Coordinates are approximate real GPS positions around Mombasa for live tracking simulation.
+// Mombasa Terminus (Miritini) is at approximately -4.0250, 39.5950
 export const STAGES: Stage[] = [
   // --- SOUTH COAST: Likoni cluster ---
-  { id: 's-likoni-ferry',  name: 'Likoni Ferry Container', area: 'Likoni', coast: 'south', travelMin: 35, peakAdjustMin: 15, landmark: 'Main SGR collection point, Likoni' },
-  { id: 's-fayaz',         name: 'Fayaz (Kona Mpya)',      area: 'Likoni', coast: 'south', travelMin: 38, peakAdjustMin: 15, landmark: 'Kona Mpya junction' },
-  { id: 's-shikaadabu',    name: 'ShikaAdabu (Checkpoint)', area: 'Likoni', coast: 'south', travelMin: 42, peakAdjustMin: 20, landmark: 'Checkpoint stage' },
+  { id: 's-likoni-ferry',  name: 'Likoni Ferry Container', area: 'Likoni', coast: 'south', travelMin: 35, peakAdjustMin: 15, landmark: 'Main SGR collection point, Likoni', lat: -4.0710, lng: 39.6660 },
+  { id: 's-fayaz',         name: 'Fayaz (Kona Mpya)',      area: 'Likoni', coast: 'south', travelMin: 38, peakAdjustMin: 15, landmark: 'Kona Mpya junction', lat: -4.0780, lng: 39.6720 },
+  { id: 's-shikaadabu',    name: 'ShikaAdabu (Checkpoint)', area: 'Likoni', coast: 'south', travelMin: 42, peakAdjustMin: 20, landmark: 'Checkpoint stage', lat: -4.0850, lng: 39.6790 },
 
   // --- SOUTH COAST: Diani cluster ---
-  { id: 's-kombani',       name: 'Kombani',                 area: 'Kombani', coast: 'south', travelMin: 50, peakAdjustMin: 20, landmark: 'Kombani junction' },
-  { id: 's-naivas-diani',  name: 'Naivas Diani',            area: 'Ukunda',  coast: 'south', travelMin: 60, peakAdjustMin: 25, landmark: 'Naivas Diani supermarket' },
+  { id: 's-kombani',       name: 'Kombani',                 area: 'Kombani', coast: 'south', travelMin: 50, peakAdjustMin: 20, landmark: 'Kombani junction', lat: -4.2430, lng: 39.5630 },
+  { id: 's-naivas-diani',  name: 'Naivas Diani',            area: 'Ukunda',  coast: 'south', travelMin: 60, peakAdjustMin: 25, landmark: 'Naivas Diani supermarket', lat: -4.2780, lng: 39.5720 },
 
   // --- NORTH COAST ---
-  { id: 's-kimbeni',       name: 'Kimbeni',                 area: 'Bamburi', coast: 'north', travelMin: 45, peakAdjustMin: 20, landmark: 'Kimbeni stage, Bamburi' },
-  { id: 's-mtambo',        name: 'Mtambo',                  area: 'Bamburi', coast: 'north', travelMin: 48, peakAdjustMin: 20, landmark: 'Mtambo stage, Bamburi' },
-  { id: 's-mtwapa',        name: 'Mtwapa',                  area: 'Mtwapa',  coast: 'north', travelMin: 55, peakAdjustMin: 25, landmark: 'Mtwapa town stage' },
+  { id: 's-kimbeni',       name: 'Kimbeni',                 area: 'Bamburi', coast: 'north', travelMin: 45, peakAdjustMin: 20, landmark: 'Kimbeni stage, Bamburi', lat: -3.9950, lng: 39.7180 },
+  { id: 's-mtambo',        name: 'Mtambo',                  area: 'Bamburi', coast: 'north', travelMin: 48, peakAdjustMin: 20, landmark: 'Mtambo stage, Bamburi', lat: -3.9980, lng: 39.7250 },
+  { id: 's-mtwapa',        name: 'Mtwapa',                  area: 'Mtwapa',  coast: 'north', travelMin: 55, peakAdjustMin: 25, landmark: 'Mtwapa town stage', lat: -3.9530, lng: 39.7440 },
 
   // North Coast stages further out — specific locations TBD by user
-  { id: 's-malindi',       name: 'Malindi',                 area: 'Malindi', coast: 'north', travelMin: 120, peakAdjustMin: 30, landmark: 'Malindi town (location TBD)' },
+  { id: 's-malindi',       name: 'Malindi',                 area: 'Malindi', coast: 'north', travelMin: 120, peakAdjustMin: 30, landmark: 'Malindi town (location TBD)', lat: -3.9390, lng: 39.8490 },
 ];
+
+// Mombasa Terminus GPS position (for route calculations)
+export const TERMINUS_GPS = { lat: -4.0250, lng: 39.5950 };
 
 // Trains — Madaraka Express (real schedule from Kenya Railways)
 // MTM = Mombasa Terminus to Nairobi (departures)

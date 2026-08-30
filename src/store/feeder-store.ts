@@ -15,12 +15,20 @@ import {
   todayStr,
 } from '@/lib/feeder/seed';
 import { computeTripTiming, nudgeFare, computeFare, canDriverAcceptCharter } from '@/lib/feeder/calc';
+import { computeDriverPosition } from '@/lib/feeder/gps';
+import { SEED_SESSIONS, permissionsForRoles, canAccessAdmin } from '@/lib/feeder/rbac';
+import type { Session, DriverPosition, Permission } from '@/lib/feeder/types';
 
 export type Role = 'passenger' | 'driver' | 'admin';
 export type PassengerDirection = 'inbound' | 'outbound';
 
 interface FeederState {
-  role: Role;
+  // Auth / session
+  session: Session | null;
+  role: Role;                    // = session?.activeRole (kept for backward compat)
+  // GPS tracking
+  driverPositions: Record<string, DriverPosition>;  // cabId → live position
+  // Core data
   settings: Settings;
   cabs: Cab[];
   bookings: Booking[];
@@ -41,6 +49,15 @@ interface FeederState {
 
   // Actions
   setRole: (r: Role) => void;
+  // Auth actions
+  login: (role: Role) => void;
+  logout: () => void;
+  switchRole: (r: Role) => void;
+  hasPermission: (p: Permission) => boolean;
+  // GPS actions
+  updateDriverPosition: (cabId: string) => void;
+  startGpsSimulation: (cabId: string) => void;
+  stopGpsSimulation: () => void;
   setPassengerDirection: (d: PassengerDirection) => void;
   setSelectedDate: (d: string) => void;
   setSelectedTrainId: (id: string) => void;
@@ -75,9 +92,12 @@ interface FeederState {
 type Direction = 'inbound' | 'outbound';
 
 let bookingCounter = 100;
+let gpsInterval: ReturnType<typeof setInterval> | null = null;
 
 export const useFeederStore = create<FeederState>((set, get) => ({
+  session: null,
   role: 'passenger',
+  driverPositions: {},
   settings: SETTINGS,
   cabs: SEED_CABS,
   bookings: [...SEED_BOOKINGS, ...SEED_UNASSIGNED],
@@ -93,9 +113,92 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   activeDriverCabId: ACTIVE_DRIVER_ID,
   driverStats: DRIVER_STATS,
 
-  setRole: (r) => set({ role: r }),
+  setRole: (r) => {
+    // Switch active role if the session supports it (multi-role accounts)
+    const session = get().session;
+    if (session && session.roles.includes(r)) {
+      const updated = { ...session, activeRole: r, permissions: permissionsForRoles(session.roles) };
+      set({ session: updated, role: r });
+    } else {
+      set({ role: r });
+    }
+  },
+
+  // ━━ Auth actions ━━
+  login: (role) => {
+    const session = SEED_SESSIONS[role];
+    if (session) {
+      set({ session: { ...session, loginAt: Date.now() }, role });
+    }
+  },
+
+  logout: () => {
+    // Stop any GPS simulation
+    if (gpsInterval) {
+      clearInterval(gpsInterval);
+      gpsInterval = null;
+    }
+    set({ session: null, role: 'passenger', driverPositions: {} });
+  },
+
+  switchRole: (r) => {
+    const session = get().session;
+    if (session && session.roles.includes(r)) {
+      const updated = { ...session, activeRole: r };
+      set({ session: updated, role: r });
+    }
+  },
+
+  hasPermission: (p) => {
+    const session = get().session;
+    if (!session) return false;
+    return session.permissions.includes(p);
+  },
+
+  // ━━ GPS actions ━━
+  updateDriverPosition: (cabId) => {
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const stage = STAGES.find(s => s.id === cab.stageId);
+    if (!stage) return;
+
+    const currentPos = get().driverPositions[cabId];
+    const currentProgress = currentPos?.routeProgress ?? 0;
+
+    // Advance progress by a small increment (simulates 15s of driving)
+    const increment = 0.02 + Math.random() * 0.01;
+    const newProgress = Math.min(0.95, currentProgress + increment); // cap at 95% so it never "arrives" in sim
+
+    const newPos = computeDriverPosition(cabId, stage, cab.direction, newProgress);
+    set({
+      driverPositions: { ...get().driverPositions, [cabId]: newPos },
+    });
+  },
+
+  startGpsSimulation: (cabId) => {
+    // Stop any existing simulation
+    if (gpsInterval) clearInterval(gpsInterval);
+    // Initialize position at progress 0
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const stage = STAGES.find(s => s.id === cab.stageId);
+    if (!stage) return;
+    const initialPos = computeDriverPosition(cabId, stage, cab.direction, 0);
+    set({ driverPositions: { ...get().driverPositions, [cabId]: initialPos } });
+    // Update every 3 seconds (prototype speed; production would be 15s)
+    gpsInterval = setInterval(() => {
+      get().updateDriverPosition(cabId);
+    }, 3000);
+  },
+
+  stopGpsSimulation: () => {
+    if (gpsInterval) {
+      clearInterval(gpsInterval);
+      gpsInterval = null;
+    }
+  },
+
   setPassengerDirection: (d) => {
-    // Auto-pick a sensible default train for the direction
     const trainId = d === 'inbound' ? 't-dep-2' : 't-arr-2';
     set({ passengerDirection: d, selectedTrainId: trainId, selectedStageId: null });
   },
