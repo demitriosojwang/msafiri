@@ -16,6 +16,7 @@ import { useFeederStore } from '@/store/feeder-store';
 import { SeatMeter, Stars, StatusBadge, TrainPill, CharterBadge } from './Shared';
 import { LeaveCountdownBadge } from './TripTiming';
 import { BookingSheet } from './BookingSheet';
+import { PaymentSheet } from './PaymentSheet';
 import { PassengerLiveTracking } from './PassengerLiveTracking';
 import { DatePicker } from './DatePicker';
 import { SeatStepper } from './SeatStepper';
@@ -61,6 +62,7 @@ export function PassengerView() {
 
   const [selectedCab, setSelectedCab] = useState<Cab | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [paymentBookingId, setPaymentBookingId] = useState<string | null>(null);
 
   const myBookings = bookings.filter(b => b.status !== 'cancelled' && b.isMine);
 
@@ -464,8 +466,13 @@ export function PassengerView() {
             if (!cab) return null;
             const stage = STAGES.find(s => s.id === b.stageId);
             const train = TRAINS.find(t => t.id === cab.trainId);
+            const needsPayment = b.status === 'awaiting_payment' || b.status === 'payment_failed';
+            const isPaid = b.status === 'payment_confirmed' || b.status === 'confirmed' || b.status === 'completed';
             return (
-              <Card key={b.id} className={cn(b.kind === 'charter' && 'border-violet-300 bg-violet-50/30')}>
+              <Card key={b.id} className={cn(
+                b.kind === 'charter' && 'border-violet-300 bg-violet-50/30',
+                needsPayment && 'border-amber-300 bg-amber-50/30',
+              )}>
                 <CardContent className="p-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-sm font-medium">
@@ -473,6 +480,16 @@ export function PassengerView() {
                       {b.kind === 'charter' && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-900">
                           <Crown className="w-2.5 h-2.5" /> Charter
+                        </span>
+                      )}
+                      {needsPayment && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                          Payment due
+                        </span>
+                      )}
+                      {isPaid && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900">
+                          <CheckCircle2 className="w-2.5 h-2.5" /> Paid
                         </span>
                       )}
                     </div>
@@ -486,7 +503,17 @@ export function PassengerView() {
                       )}
                     </div>
                   </div>
-                  <StatusBadge status={cab.status} />
+                  {needsPayment ? (
+                    <Button
+                      size="sm"
+                      className="h-8 shrink-0"
+                      onClick={() => setPaymentBookingId(b.id)}
+                    >
+                      Pay now
+                    </Button>
+                  ) : (
+                    <StatusBadge status={cab.status} />
+                  )}
                 </CardContent>
               </Card>
             );
@@ -495,6 +522,13 @@ export function PassengerView() {
       )}
 
       <BookingSheet cab={selectedCab} open={sheetOpen} onOpenChange={setSheetOpen} />
+
+      {/* Payment sheet — opens when user clicks "Pay now" */}
+      <PaymentSheet
+        booking={paymentBookingId ? bookings.find(b => b.id === paymentBookingId) ?? null : null}
+        open={!!paymentBookingId}
+        onOpenChange={(v) => !v && setPaymentBookingId(null)}
+      />
     </div>
   );
 }

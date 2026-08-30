@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { Booking, Cab, PickupRequest, Settings, BookingKind, PickupKind } from '@/lib/feeder/types';
+import type { Booking, Cab, PickupRequest, Settings, BookingKind, PickupKind, Payment, Receipt, Rating } from '@/lib/feeder/types';
 import {
   DRIVER_STATS,
   SEED_BOOKINGS,
@@ -60,6 +60,10 @@ interface FeederState {
   // Driver view state
   activeDriverCabId: string;
   driverStats: typeof DRIVER_STATS;
+  // Payment state
+  payments: Payment[];
+  receipts: Receipt[];
+  ratings: Rating[];
 
   // Actions
   setRole: (r: Role) => void;
@@ -96,8 +100,18 @@ interface FeederState {
   acceptCharterRequest: (requestId: string, cabId: string) => void;
   declineRequest: (requestId: string) => void;
   startTrip: (cabId: string) => void;
+  completeTrip: (cabId: string) => void;
   assignCabToStage: (cabId: string, stageId: string) => void;
   autoAssign: (trainId: string) => { assigned: number; unassigned: number; details: string[] };
+  // Payment actions
+  initiatePayment: (bookingId: string, phoneNumber: string) => Payment | null;
+  confirmPayment: (paymentId: string) => Receipt | null;
+  failPayment: (paymentId: string, reason: string) => void;
+  getPaymentForBooking: (bookingId: string) => Payment | undefined;
+  getReceiptForBooking: (bookingId: string) => Receipt | undefined;
+  // Rating actions
+  submitRating: (bookingId: string, stars: number, comment?: string) => void;
+  getRatingForBooking: (bookingId: string) => Rating | undefined;
 
   // Selectors
   getCab: (id: string) => Cab | undefined;
@@ -138,6 +152,9 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   seatsRequested: 1,
   activeDriverCabId: ACTIVE_DRIVER_ID,
   driverStats: DRIVER_STATS,
+  payments: [],
+  receipts: [],
+  ratings: [],
 
   setRole: (r) => {
     // Switch active role if the session supports it (multi-role accounts)
@@ -384,7 +401,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
       offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
       hasTicket,
       direction: cab.direction,
-      status: 'reserved',
+      status: 'awaiting_payment' as const,
       kind: 'pooled',
       seatsReserved: seatsRequested,
       farePaid: fare.perSeat * seatsRequested,
@@ -452,7 +469,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
       offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
       hasTicket,
       direction: cab.direction,
-      status: 'reserved',
+      status: 'awaiting_payment' as const,
       kind: 'charter',
       seatsReserved: cab.capacity,
       farePaid: fare.total,
@@ -574,7 +591,7 @@ export const useFeederStore = create<FeederState>((set, get) => ({
       offStageDistanceKm: req.offStageDistanceKm,
       hasTicket: req.hasTicket,
       direction: cab.direction,
-      status: 'reserved',
+      status: 'awaiting_payment' as const,
       kind: 'charter',
       seatsReserved: cab.capacity,
       farePaid: fare.total,
@@ -615,18 +632,171 @@ export const useFeederStore = create<FeederState>((set, get) => ({
       bookings: state.bookings.map(b =>
         b.cabId === cabId ? { ...b, status: 'confirmed' as const } : b,
       ),
+    });
+    get().logAction('trip.start', 'cab', cabId);
+  },
+
+  completeTrip: (cabId) => {
+    const state = get();
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const isCharter = cab.charterLocked;
+    const tripBookings = state.bookings.filter(b => b.cabId === cabId && b.status !== 'cancelled');
+    const earnings = tripBookings.reduce((sum, b) => sum + b.farePaid, 0);
+
+    set({
+      cabs: state.cabs.map(c =>
+        c.id === cabId ? { ...c, status: 'arrived' as const } : c,
+      ),
+      bookings: state.bookings.map(b =>
+        b.cabId === cabId ? { ...b, status: 'completed' as const } : b,
+      ),
       driverStats: {
         ...state.driverStats,
         tripsCompleted: state.driverStats.tripsCompleted + 1,
         seatsFilled: state.driverStats.seatsFilled + cab.bookedSeats,
         seatsOffered: state.driverStats.seatsOffered + cab.capacity,
         chartersCompleted: state.driverStats.chartersCompleted + (isCharter ? 1 : 0),
-        todayEarningsKSh: state.driverStats.todayEarningsKSh +
-          state.bookings
-            .filter(b => b.cabId === cabId && b.status !== 'cancelled')
-            .reduce((sum, b) => sum + b.farePaid, 0),
+        todayEarningsKSh: state.driverStats.todayEarningsKSh + earnings,
       },
     });
+    get().logAction('trip.complete', 'cab', cabId, { earnings });
+  },
+
+  // ━━ Payment actions ━━
+  initiatePayment: (bookingId, phoneNumber) => {
+    const state = get();
+    const booking = state.bookings.find(b => b.id === bookingId);
+    if (!booking) return null;
+
+    // Check for existing pending payment (idempotency)
+    const existing = state.payments.find(p => p.bookingId === bookingId && p.status === 'pending');
+    if (existing) return existing;
+
+    const paymentId = `pay-${Date.now()}`;
+    const payment: Payment = {
+      id: paymentId,
+      bookingId,
+      amountKSh: booking.farePaid,
+      status: 'stk_push_sent',
+      provider: 'mpesa',
+      providerRequestRef: `CRID-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+      idempotencyKey: `idem-${Date.now()}`,
+      phoneNumber: sanitizeInput(phoneNumber),
+      initiatedAt: Date.now(),
+    };
+
+    set({
+      payments: [...state.payments, payment],
+      bookings: state.bookings.map(b =>
+        b.id === bookingId ? { ...b, status: 'awaiting_payment' as const } : b,
+      ),
+    });
+    get().logAction('payment.initiate', 'payment', paymentId, { bookingId, amount: booking.farePaid });
+    return payment;
+  },
+
+  confirmPayment: (paymentId) => {
+    const state = get();
+    const payment = state.payments.find(p => p.id === paymentId);
+    if (!payment) return null;
+    const booking = state.bookings.find(b => b.id === payment.bookingId);
+    if (!booking) return null;
+    const cab = booking.cabId ? state.cabs.find(c => c.id === booking.cabId) : undefined;
+    const stage = booking.stageId ? STAGES.find(s => s.id === booking.stageId) : undefined;
+    const train = cab ? TRAINS.find(t => t.id === cab.trainId) : undefined;
+
+    // Generate M-Pesa transaction ID (format: 4 letters + 6 alphanumeric)
+    const txnId = Array.from({ length: 4 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]).join('') +
+                  Math.random().toString(36).slice(2, 8).toUpperCase();
+
+    // Generate receipt number (format: MSF-XX99XX)
+    const receiptNum = `MSF-${Math.random().toString(36).slice(2, 4).toUpperCase()}${Math.floor(Math.random() * 90 + 10)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
+
+    const receipt: Receipt = {
+      id: `rcpt-${Date.now()}`,
+      bookingId: booking.id,
+      paymentId: payment.id,
+      receiptNumber: receiptNum,
+      amountKSh: payment.amountKSh,
+      passengerName: booking.passengerName,
+      route: stage ? `${stage.name} → ${train?.destination ?? 'Terminus'}` : booking.pickupPoint,
+      trainCode: train?.code ?? 'N/A',
+      trainTime: train?.time ?? 'N/A',
+      date: state.selectedDate,
+      seats: booking.seatsReserved,
+      cabType: cab?.cabType,
+      driverName: cab?.driverName,
+      plateNumber: cab?.plateNumber,
+      transactionId: txnId,
+      issuedAt: Date.now(),
+    };
+
+    set({
+      payments: state.payments.map(p =>
+        p.id === paymentId
+          ? { ...p, status: 'confirmed' as const, providerTransactionId: txnId, confirmedAt: Date.now(), callbackAt: Date.now() }
+          : p,
+      ),
+      bookings: state.bookings.map(b =>
+        b.id === booking.id ? { ...b, status: 'payment_confirmed' as const } : b,
+      ),
+      receipts: [...state.receipts, receipt],
+    });
+    get().logAction('payment.confirm', 'payment', paymentId, { txnId, amount: payment.amountKSh });
+    return receipt;
+  },
+
+  failPayment: (paymentId, reason) => {
+    const state = get();
+    set({
+      payments: state.payments.map(p =>
+        p.id === paymentId ? { ...p, status: 'failed' as const, failedReason: reason } : p,
+      ),
+      bookings: state.bookings.map(b => {
+        const payment = state.payments.find(p => p.id === paymentId);
+        if (payment && b.id === payment.bookingId) {
+          return { ...b, status: 'payment_failed' as const };
+        }
+        return b;
+      }),
+    });
+    get().logAction('payment.fail', 'payment', paymentId, { reason });
+  },
+
+  getPaymentForBooking: (bookingId) => {
+    return get().payments.find(p => p.bookingId === bookingId);
+  },
+
+  getReceiptForBooking: (bookingId) => {
+    return get().receipts.find(r => r.bookingId === bookingId);
+  },
+
+  // ━━ Rating actions ━━
+  submitRating: (bookingId, stars, comment) => {
+    const state = get();
+    const booking = state.bookings.find(b => b.id === bookingId);
+    if (!booking || !booking.cabId) return;
+    const cab = state.cabs.find(c => c.id === booking.cabId);
+    if (!cab) return;
+
+    const rating: Rating = {
+      id: `rating-${Date.now()}`,
+      bookingId,
+      cabId: booking.cabId,
+      passengerName: booking.passengerName,
+      driverName: cab.driverName,
+      stars: Math.max(1, Math.min(5, stars)),
+      comment: comment ? sanitizeInput(comment) : undefined,
+      createdAt: Date.now(),
+    };
+
+    set({ ratings: [...state.ratings, rating] });
+    get().logAction('rating.submit', 'rating', rating.id, { stars, driverName: cab.driverName });
+  },
+
+  getRatingForBooking: (bookingId) => {
+    return get().ratings.find(r => r.bookingId === bookingId);
   },
 
   assignCabToStage: (cabId, stageId) => {

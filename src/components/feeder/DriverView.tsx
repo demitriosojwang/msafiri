@@ -29,6 +29,7 @@ import {
   Star,
   TrendingUp,
   Play,
+  CheckCircle2,
   Check,
   X,
   MapPin,
@@ -56,6 +57,7 @@ export function DriverView() {
   const acceptCharterRequest = useFeederStore(s => s.acceptCharterRequest);
   const declineRequest = useFeederStore(s => s.declineRequest);
   const startTrip = useFeederStore(s => s.startTrip);
+  const completeTrip = useFeederStore(s => s.completeTrip);
 
   const { toast } = useToast();
   const [showTiming, setShowTiming] = useState(false);
@@ -335,24 +337,39 @@ export function DriverView() {
             </div>
           </div>
 
-          {/* Start trip */}
+          {/* Start / Complete trip */}
           <Separator />
-          <Button
-            className="w-full h-11"
-            disabled={inboundCab.status !== 'filling' || (!isCharterLocked && !thresholdMet && !autoLock.locked && timing.minutesUntilLeave > 0 && myBookings.length === 0)}
-            onClick={handleStartTrip}
-          >
-            <Play className="w-4 h-4 mr-1" />
-            {inboundCab.status !== 'filling'
-              ? `Trip ${inboundCab.status}`
-              : isCharterLocked
-                ? `Start charter trip · ${inboundCab.bookedSeats} seats`
-                : myBookings.length === 0
-                  ? 'No passengers yet'
-                  : !thresholdMet && !autoLock.locked
-                    ? `Wait — ${Math.round(settings.minFillThreshold * 100)}% threshold not met`
-                    : `Start trip · ${inboundCab.bookedSeats} passengers`}
-          </Button>
+          {inboundCab.status === 'departed' ? (
+            <Button
+              className="w-full h-11 bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => {
+                completeTrip(inboundCab.id);
+                toast({
+                  title: 'Trip completed',
+                  description: `Earnings: KSh ${myBookings.reduce((s, b) => s + b.farePaid, 0).toLocaleString()} · ${myBookings.length} passengers delivered`,
+                });
+              }}
+            >
+              <CheckCircle2 className="w-4 h-4 mr-1" /> Complete trip · {inboundCab.bookedSeats} passengers delivered
+            </Button>
+          ) : (
+            <Button
+              className="w-full h-11"
+              disabled={inboundCab.status !== 'filling' || (!isCharterLocked && !thresholdMet && !autoLock.locked && timing.minutesUntilLeave > 0 && myBookings.length === 0)}
+              onClick={handleStartTrip}
+            >
+              <Play className="w-4 h-4 mr-1" />
+              {inboundCab.status !== 'filling'
+                ? `Trip ${inboundCab.status}`
+                : isCharterLocked
+                  ? `Start charter trip · ${inboundCab.bookedSeats} seats`
+                  : myBookings.length === 0
+                    ? 'No passengers yet'
+                    : !thresholdMet && !autoLock.locked
+                      ? `Wait — ${Math.round(settings.minFillThreshold * 100)}% threshold not met`
+                      : `Start trip · ${inboundCab.bookedSeats} passengers`}
+            </Button>
+          )}
           {!isCharterLocked && !thresholdMet && !autoLock.locked && inboundCab.status === 'filling' && myBookings.length > 0 && (
             <p className="text-[11px] text-center text-muted-foreground">
               You can override once {timing.cutoffTime} arrives ({fmtCountdown(timing.minutesUntilCutoff)}).

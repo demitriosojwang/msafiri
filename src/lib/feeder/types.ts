@@ -21,11 +21,62 @@ export type Coast = 'south' | 'north';
 
 export type CabStatus = 'filling' | 'locked' | 'departed' | 'arrived';
 
-export type BookingStatus = 'reserved' | 'confirmed' | 'cancelled';
+export type BookingStatus = 'reserved' | 'confirmed' | 'cancelled' | 'awaiting_payment' | 'payment_confirmed' | 'payment_failed' | 'completed';
 
 export type BookingKind = 'pooled' | 'charter';
 
 export type PickupKind = 'stage' | 'off-stage';
+
+// Payment state — mirrors the M-Pesa Daraja STK push flow
+export type PaymentStatus = 'pending' | 'stk_push_sent' | 'callback_received' | 'verified' | 'confirmed' | 'failed' | 'expired' | 'refunded';
+
+export type Payment = {
+  id: string;
+  bookingId: string;
+  amountKSh: number;
+  status: PaymentStatus;
+  provider: 'mpesa' | 'airtel' | 'card' | 'cash';
+  providerRequestRef?: string;      // M-Pesa CheckoutRequestID
+  providerTransactionId?: string;   // M-Pesa MpesaCode (from callback)
+  idempotencyKey: string;
+  phoneNumber?: string;
+  initiatedAt: number;
+  callbackAt?: number;
+  confirmedAt?: number;
+  failedReason?: string;
+};
+
+// Receipt — generated after payment confirmation
+export type Receipt = {
+  id: string;
+  bookingId: string;
+  paymentId: string;
+  receiptNumber: string;            // human-readable: MSF-AB12CD
+  amountKSh: number;
+  passengerName: string;
+  route: string;                    // "Mtwapa → Mombasa Terminus"
+  trainCode: string;
+  trainTime: string;
+  date: string;
+  seats: number;
+  cabType?: string;
+  driverName?: string;
+  plateNumber?: string;
+  transactionId: string;            // M-Pesa transaction code
+  issuedAt: number;
+};
+
+// Rating — passenger rates driver after trip completion
+export type Rating = {
+  id: string;
+  bookingId: string;
+  cabId: string;
+  passengerName: string;
+  driverName: string;
+  stars: number;                    // 1..5
+  comment?: string;
+  createdAt: number;
+};
 
 // A stage = an agreed SGR waiting/collection point used as pickup/drop-off.
 // Grouped by area (Likoni, Ukunda, Bamburi, Mtwapa, Malindi, Kombani).

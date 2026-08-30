@@ -72,12 +72,12 @@ export function BookingSheet({ cab, open, onOpenChange }: {
     if (id) {
       setConfirmed(true);
       toast({
-        title: isCharter ? 'Charter reserved' : 'Seat reserved',
+        title: isCharter ? 'Charter reserved — payment due' : 'Seat reserved — payment due',
         description: isCharter
-          ? `Whole ${cab.cabType} reserved for ${cab.driverName} on ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`
+          ? `Whole ${cab.cabType} reserved for ${cab.driverName} on ${fmtDateShort(selectedDate)}. Complete M-Pesa payment to confirm.`
           : seatsRequested > 1
-            ? `${seatsRequested} seats reserved on ${cab.driverName}'s ${cab.cabType} for ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`
-            : `You're on ${cab.driverName}'s ${cab.cabType} on ${fmtDateShort(selectedDate)}. Leave by ${timing.latestLeaveTime}.`,
+            ? `${seatsRequested} seats reserved on ${cab.driverName}'s ${cab.cabType} for ${fmtDateShort(selectedDate)}. Complete M-Pesa payment to confirm.`
+            : `You're on ${cab.driverName}'s ${cab.cabType} on ${fmtDateShort(selectedDate)}. Complete M-Pesa payment to confirm.`,
       });
     }
   }
