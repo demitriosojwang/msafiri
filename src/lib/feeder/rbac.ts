@@ -103,45 +103,80 @@ export function canAccessAdmin(session: Session | null): boolean {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SEED SESSIONS — for the prototype, we simulate logged-in users.
-// In production, these come from the auth backend after OTP/password verification.
+// EMAIL-BASED ROLE DETECTION
+//
+// The admin email is stored server-side (environment variable in production).
+// When someone logs in, the backend checks their email against this list.
+// If it matches → admin session. Otherwise → passenger or driver based on account.
+//
+// The admin email is NEVER shown in the UI. There is no "Admin" login button.
+// The platform silently recognises the admin from their email.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import type { Cab } from './types';
+// In production, this comes from an environment variable or database table.
+// For the prototype, it's hardcoded here. Change this to your actual email.
+export const ADMIN_EMAILS: string[] = [
+  'demitri@msafiri.co.ke',
+  'admin@msafiri.co.ke',
+];
 
-export const SEED_SESSIONS: Record<string, Session> = {
-  passenger: {
-    userId: 'u-passenger-1',
-    displayName: 'Aisha M.',
-    phone: '+254712345678',
-    roles: ['passenger'],
-    activeRole: 'passenger',
-    permissions: permissionsForRoles(['passenger']),
-    loginAt: Date.now(),
-  },
-  driver: {
-    userId: 'u-driver-mwangi',
-    displayName: 'Mwangi',
-    phone: '+254722334455',
-    roles: ['driver', 'passenger'],  // multi-role: driver who can also book as passenger
-    activeRole: 'driver',
-    driverProfileId: 'c9',  // Patrick's cab (the active driver in the seed)
-    permissions: permissionsForRoles(['driver', 'passenger']),
-    loginAt: Date.now(),
-  },
-  admin: {
-    userId: 'u-admin-1',
-    displayName: 'Demitri',
-    phone: '+254700000000',
-    roles: ['admin'],
-    activeRole: 'admin',
-    permissions: permissionsForRoles(['admin']),
-    loginAt: Date.now(),
-  },
+// Known driver phone numbers → driver sessions (in production, from database)
+export const DRIVER_PHONES: Record<string, { name: string; cabId: string }> = {
+  '+254722334455': { name: 'Mwangi', cabId: 'c9' },
+  '+254733445566': { name: 'Amani', cabId: 'c2' },
 };
 
-// Map cab driver names to their driver profile IDs for the driver session
-export function findDriverCabId(cabs: Cab[], driverName: string): string | undefined {
-  const cab = cabs.find(c => c.driverName === driverName);
-  return cab?.id;
+// Detect what role(s) an account should have based on email or phone.
+// This runs server-side after OTP verification.
+export function detectRolesFromIdentifier(identifier: string): {
+  roles: Role[];
+  displayName: string;
+  driverProfileId?: string;
+} {
+  const normalized = identifier.trim().toLowerCase();
+
+  // Check if this is an admin email
+  if (ADMIN_EMAILS.some(e => e.toLowerCase() === normalized)) {
+    const name = normalized.split('@')[0];
+    return {
+      roles: ['admin'],
+      displayName: name.charAt(0).toUpperCase() + name.slice(1),
+    };
+  }
+
+  // Check if this is a known driver phone
+  if (DRIVER_PHONES[identifier]) {
+    const driver = DRIVER_PHONES[identifier];
+    return {
+      roles: ['driver', 'passenger'],  // multi-role
+      displayName: driver.name,
+      driverProfileId: driver.cabId,
+    };
+  }
+
+  // Default: passenger only
+  const name = normalized.includes('@')
+    ? normalized.split('@')[0]
+    : 'Passenger';
+  return {
+    roles: ['passenger'],
+    displayName: name.charAt(0).toUpperCase() + name.slice(1),
+  };
+}
+
+// Create a session from a login attempt
+export function createSession(identifier: string): Session {
+  const { roles, displayName, driverProfileId } = detectRolesFromIdentifier(identifier);
+  const activeRole = roles.includes('admin') ? 'admin' : roles[0];
+
+  return {
+    userId: `u-${Date.now()}`,
+    displayName,
+    phone: identifier.includes('@') ? '' : identifier,
+    roles,
+    activeRole,
+    driverProfileId,
+    permissions: permissionsForRoles(roles),
+    loginAt: Date.now(),
+  };
 }

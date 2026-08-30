@@ -16,7 +16,7 @@ import {
 } from '@/lib/feeder/seed';
 import { computeTripTiming, nudgeFare, computeFare, canDriverAcceptCharter } from '@/lib/feeder/calc';
 import { computeDriverPosition } from '@/lib/feeder/gps';
-import { SEED_SESSIONS, permissionsForRoles, canAccessAdmin } from '@/lib/feeder/rbac';
+import { createSession, permissionsForRoles } from '@/lib/feeder/rbac';
 import type { Session, DriverPosition, Permission } from '@/lib/feeder/types';
 
 export type Role = 'passenger' | 'driver' | 'admin';
@@ -50,7 +50,7 @@ interface FeederState {
   // Actions
   setRole: (r: Role) => void;
   // Auth actions
-  login: (role: Role) => void;
+  login: (identifier: string) => void;
   logout: () => void;
   switchRole: (r: Role) => void;
   hasPermission: (p: Permission) => boolean;
@@ -125,11 +125,11 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   },
 
   // ━━ Auth actions ━━
-  login: (role) => {
-    const session = SEED_SESSIONS[role];
-    if (session) {
-      set({ session: { ...session, loginAt: Date.now() }, role });
-    }
+  login: (identifier: string) => {
+    // In production, the backend verifies OTP then returns a JWT with the user's roles.
+    // Here we simulate by detecting roles from the email/phone identifier.
+    const session = createSession(identifier);
+    set({ session, role: session.activeRole });
   },
 
   logout: () => {

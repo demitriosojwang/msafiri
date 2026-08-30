@@ -38,10 +38,6 @@ export function FeederApp() {
   const [showSplash, setShowSplash] = useState(true);
   const [aboutOpen, setAboutOpen] = useState(false);
 
-  function exitAdmin() {
-    logout();
-  }
-
   // If splash is done and no session, show login screen
   if (!showSplash && !session) {
     return <LoginScreen />;
@@ -81,30 +77,20 @@ export function FeederApp() {
                 Switch to {session.activeRole === 'driver' ? 'Passenger' : 'Driver'}
               </button>
             )}
-            {role === 'admin' ? (
-              <button
-                onClick={exitAdmin}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-              >
-                <X className="w-3.5 h-3.5" /> Exit
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => setAboutOpen(true)}
-                  className="p-2 rounded-lg hover:bg-accent text-muted-foreground"
-                  aria-label="About"
-                >
-                  <Info className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={logout}
-                  className="text-[10px] text-muted-foreground hover:text-foreground"
-                >
-                  Logout
-                </button>
-              </>
-            )}
+            {/* Unified header for all roles — admin just sees different content */}
+            <button
+              onClick={() => setAboutOpen(true)}
+              className="p-2 rounded-lg hover:bg-accent text-muted-foreground"
+              aria-label="About"
+            >
+              <Info className="w-4 h-4" />
+            </button>
+            <button
+              onClick={logout}
+              className="text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              Logout
+            </button>
           </div>
         </div>
 
