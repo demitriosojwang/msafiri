@@ -480,6 +480,9 @@ export function DriverView() {
         </Card>
       )}
 
+      {/* Earnings breakdown + trip history */}
+      <DriverEarningsBreakdown />
+
       {/* Charter confirmation sheet */}
       <CharterConfirmSheet
         open={!!charterConfirm}
@@ -719,5 +722,125 @@ function Row({ label, value }: { label: string; value: string }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
     </div>
+  );
+}
+
+function DriverEarningsBreakdown() {
+  const cabs = useFeederStore(s => s.cabs);
+  const bookings = useFeederStore(s => s.bookings);
+  const payments = useFeederStore(s => s.payments);
+  const ratings = useFeederStore(s => s.ratings);
+  const activeDriverCabId = useFeederStore(s => s.activeDriverCabId);
+  const stats = useFeederStore(s => s.driverStats);
+
+  const activeCab = cabs.find(c => c.id === activeDriverCabId);
+  const myCabs = activeCab ? cabs.filter(c => c.driverName === activeCab.driverName) : [];
+
+  // Gather all bookings for this driver's cabs
+  const allMyBookings = bookings.filter(b =>
+    b.status !== 'cancelled' &&
+    b.cabId &&
+    myCabs.some(c => c.id === b.cabId),
+  );
+
+  // Completed trips (bookings with status 'completed')
+  const completedBookings = allMyBookings.filter(b => b.status === 'completed');
+  const totalEarned = completedBookings.reduce((s, b) => s + b.farePaid, 0);
+  const pendingEarnings = allMyBookings
+    .filter(b => b.status === 'confirmed' || b.status === 'payment_confirmed')
+    .reduce((s, b) => s + b.farePaid, 0);
+  const unpaidBookings = allMyBookings.filter(b => b.status === 'awaiting_payment' || b.status === 'payment_failed');
+
+  // Recent trip history (last 10)
+  const tripHistory = allMyBookings
+    .filter(b => b.status === 'completed' || b.status === 'confirmed')
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 10);
+
+  // Average rating
+  const myRatings = ratings.filter(r => myCabs.some(c => c.id === r.cabId));
+  const avgRating = myRatings.length > 0
+    ? myRatings.reduce((s, r) => s + r.stars, 0) / myRatings.length
+    : stats.rating;
+
+  return (
+    <Card className="border-primary/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <Wallet className="w-4 h-4 text-primary" /> Earnings & History
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-3 space-y-3">
+        {/* Earnings summary */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-center">
+            <div className="text-[9px] uppercase text-emerald-700 tracking-wide">Earned</div>
+            <div className="text-sm font-bold text-emerald-700 tabular-nums">KSh {totalEarned.toLocaleString()}</div>
+          </div>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-center">
+            <div className="text-[9px] uppercase text-amber-700 tracking-wide">Pending</div>
+            <div className="text-sm font-bold text-amber-700 tabular-nums">KSh {pendingEarnings.toLocaleString()}</div>
+          </div>
+          <div className="rounded-lg bg-secondary border border-border p-2.5 text-center">
+            <div className="text-[9px] uppercase text-muted-foreground tracking-wide">Unpaid</div>
+            <div className="text-sm font-bold text-muted-foreground tabular-nums">{unpaidBookings.length}</div>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+          <span>{completedBookings.length} trips completed</span>
+          <span>{completedBookings.reduce((s, b) => s + b.seatsReserved, 0)} passengers</span>
+          <span className="inline-flex items-center gap-0.5 text-amber-700">
+            <Star className="w-3 h-3 fill-current" /> {avgRating.toFixed(1)}
+          </span>
+        </div>
+
+        {/* Trip history */}
+        <div className="space-y-1.5">
+          <h4 className="text-[10px] uppercase tracking-wide text-muted-foreground">Recent trips</h4>
+          {tripHistory.length === 0 && (
+            <div className="text-xs text-muted-foreground text-center py-3 border border-dashed rounded-lg">
+              No completed trips yet.
+            </div>
+          )}
+          {tripHistory.map(b => {
+            const cab = myCabs.find(c => c.id === b.cabId);
+            const payment = payments.find(p => p.bookingId === b.id);
+            const rating = ratings.find(r => r.bookingId === b.id);
+            return (
+              <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary/30 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">{b.passengerName}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {b.seatsReserved > 1 ? `${b.seatsReserved} seats` : '1 seat'} · {cab?.cabType ?? 'N/A'}
+                    {b.kind === 'charter' && ' · Charter'}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-bold tabular-nums">KSh {b.farePaid.toLocaleString()}</div>
+                  <div className="flex items-center gap-1 justify-end">
+                    {b.status === 'completed' && (
+                      <Badge variant="secondary" className="text-[8px] h-3.5 bg-emerald-100 text-emerald-700">Done</Badge>
+                    )}
+                    {b.status === 'confirmed' && (
+                      <Badge variant="secondary" className="text-[8px] h-3.5 bg-sky-100 text-sky-700">Active</Badge>
+                    )}
+                    {payment?.status === 'confirmed' && (
+                      <Badge variant="secondary" className="text-[8px] h-3.5">Paid</Badge>
+                    )}
+                    {rating && (
+                      <span className="text-[8px] text-amber-700 inline-flex items-center gap-0.5">
+                        <Star className="w-2 h-2 fill-current" />{rating.stars}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

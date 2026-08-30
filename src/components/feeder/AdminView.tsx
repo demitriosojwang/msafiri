@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { STAGES, TRAINS, TRAINS_BY_DIR } from '@/lib/feeder/seed';
@@ -37,7 +38,7 @@ export function AdminView() {
   const bookings = useFeederStore(s => s.bookings);
   const requests = useFeederStore(s => s.requests);
   const settings = useFeederStore(s => s.settings);
-  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters' | 'autoassign' | 'audit'>('arrivals');
+  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters' | 'autoassign' | 'revenue' | 'audit'>('arrivals');
 
   // Aggregate metrics
   const metrics = useMemo(() => {
@@ -169,23 +170,26 @@ export function AdminView() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid grid-cols-6 w-full">
-          <TabsTrigger value="arrivals" className="text-xs flex items-center gap-1">
+        <TabsList className="grid grid-cols-7 w-full">
+          <TabsTrigger value="arrivals" className="text-[10px] flex items-center gap-0.5">
             <Anchor className="w-3 h-3" /> Arrivals
           </TabsTrigger>
-          <TabsTrigger value="departures" className="text-xs flex items-center gap-1">
+          <TabsTrigger value="departures" className="text-[10px] flex items-center gap-0.5">
             <Navigation className="w-3 h-3" /> Departs
           </TabsTrigger>
-          <TabsTrigger value="stages" className="text-xs flex items-center gap-1">
+          <TabsTrigger value="stages" className="text-[10px] flex items-center gap-0.5">
             <MapPin className="w-3 h-3" /> Stages
           </TabsTrigger>
-          <TabsTrigger value="charters" className="text-xs flex items-center gap-1">
+          <TabsTrigger value="charters" className="text-[10px] flex items-center gap-0.5">
             <Crown className="w-3 h-3" /> Charters
           </TabsTrigger>
-          <TabsTrigger value="autoassign" className="text-xs flex items-center gap-1">
+          <TabsTrigger value="autoassign" className="text-[10px] flex items-center gap-0.5">
             <Zap className="w-3 h-3" /> Auto
           </TabsTrigger>
-          <TabsTrigger value="audit" className="text-xs flex items-center gap-1">
+          <TabsTrigger value="revenue" className="text-[10px] flex items-center gap-0.5">
+            <CircleDollarSign className="w-3 h-3" /> Revenue
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="text-[10px] flex items-center gap-0.5">
             <Shield className="w-3 h-3" /> Audit
           </TabsTrigger>
         </TabsList>
@@ -327,10 +331,207 @@ export function AdminView() {
           <AutoAssignPanel />
         </TabsContent>
 
+        <TabsContent value="revenue" className="mt-3 space-y-3">
+          <RevenuePanel />
+        </TabsContent>
+
         <TabsContent value="audit" className="mt-3 space-y-3">
           <AuditLogPanel />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function RevenuePanel() {
+  const bookings = useFeederStore(s => s.bookings);
+  const payments = useFeederStore(s => s.payments);
+  const receipts = useFeederStore(s => s.receipts);
+  const cabs = useFeederStore(s => s.cabs);
+  const logAction = useFeederStore(s => s.logAction);
+  const { toast } = useToast();
+  const [refundPaymentId, setRefundPaymentId] = useState<string | null>(null);
+  const [refundReason, setRefundReason] = useState('');
+
+  // Revenue metrics
+  const confirmedPayments = payments.filter(p => p.status === 'confirmed');
+  const totalRevenue = confirmedPayments.reduce((s, p) => s + p.amountKSh, 0);
+  const pendingPayments = payments.filter(p => p.status === 'stk_push_sent' || p.status === 'pending');
+  const failedPayments = payments.filter(p => p.status === 'failed');
+  const refundedPayments = payments.filter(p => p.status === 'refunded');
+  const totalRefunded = refundedPayments.reduce((s, p) => s + p.amountKSh, 0);
+  const netRevenue = totalRevenue - totalRefunded;
+
+  // Payment status breakdown
+  const statusCounts = {
+    confirmed: confirmedPayments.length,
+    pending: pendingPayments.length,
+    failed: failedPayments.length,
+    refunded: refundedPayments.length,
+  };
+
+  function handleRefund() {
+    if (!refundPaymentId || !refundReason.trim()) return;
+    // In production, this calls POST /api/v1/admin/refunds
+    // which calls M-Pesa's refund API and records the refund
+    const payment = payments.find(p => p.id === refundPaymentId);
+    if (payment) {
+      logAction('admin.refund', 'payment', refundPaymentId, {
+        amount: payment.amountKSh,
+        reason: refundReason,
+      });
+      toast({
+        title: 'Refund initiated',
+        description: `KSh ${payment.amountKSh.toLocaleString()} refund for ${payment.id}. In production, this triggers the M-Pesa refund API.`,
+      });
+    }
+    setRefundPaymentId(null);
+    setRefundReason('');
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Revenue summary */}
+      <div className="grid grid-cols-2 gap-2">
+        <Card className="border-emerald-200 bg-emerald-50/30">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-emerald-700 tracking-wide">Net Revenue</div>
+            <div className="text-xl font-bold text-emerald-700 tabular-nums">KSh {netRevenue.toLocaleString()}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">{confirmedPayments.length} payments confirmed</div>
+          </CardContent>
+        </Card>
+        <Card className="border-amber-200 bg-amber-50/30">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase text-amber-700 tracking-wide">Pending</div>
+            <div className="text-xl font-bold text-amber-700 tabular-nums">KSh {pendingPayments.reduce((s, p) => s + p.amountKSh, 0).toLocaleString()}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">{pendingPayments.length} payments in progress</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Payment status breakdown */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Payment Status Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2">
+              <div className="text-lg font-bold text-emerald-700 tabular-nums">{statusCounts.confirmed}</div>
+              <div className="text-[9px] text-muted-foreground">Confirmed</div>
+            </div>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
+              <div className="text-lg font-bold text-amber-700 tabular-nums">{statusCounts.pending}</div>
+              <div className="text-[9px] text-muted-foreground">Pending</div>
+            </div>
+            <div className="rounded-lg bg-red-50 border border-red-200 p-2">
+              <div className="text-lg font-bold text-red-600 tabular-nums">{statusCounts.failed}</div>
+              <div className="text-[9px] text-muted-foreground">Failed</div>
+            </div>
+            <div className="rounded-lg bg-violet-50 border border-violet-200 p-2">
+              <div className="text-lg font-bold text-violet-600 tabular-nums">{statusCounts.refunded}</div>
+              <div className="text-[9px] text-muted-foreground">Refunded</div>
+            </div>
+          </div>
+          {totalRefunded > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground text-center">
+              Total refunded: KSh {totalRefunded.toLocaleString()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* All payments */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span>Transactions ({payments.length})</span>
+            <Badge variant="secondary" className="text-[10px]">{receipts.length} receipts issued</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-1">
+          {payments.length === 0 && (
+            <div className="text-center text-sm text-muted-foreground py-4">
+              No payments yet.
+            </div>
+          )}
+          {payments.slice().reverse().map(p => {
+            const booking = bookings.find(b => b.id === p.bookingId);
+            const receipt = receipts.find(r => r.paymentId === p.id);
+            const cab = booking?.cabId ? cabs.find(c => c.id === booking.cabId) : null;
+            return (
+              <div key={p.id} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-secondary/30 text-xs border-b last:border-0">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{booking?.passengerName ?? 'Unknown'}</span>
+                    {p.status === 'confirmed' && <Badge variant="secondary" className="text-[8px] h-3.5 bg-emerald-100 text-emerald-700">Confirmed</Badge>}
+                    {p.status === 'stk_push_sent' && <Badge variant="secondary" className="text-[8px] h-3.5 bg-amber-100 text-amber-700">Pending</Badge>}
+                    {p.status === 'failed' && <Badge variant="secondary" className="text-[8px] h-3.5 bg-red-100 text-red-700">Failed</Badge>}
+                    {p.status === 'refunded' && <Badge variant="secondary" className="text-[8px] h-3.5 bg-violet-100 text-violet-700">Refunded</Badge>}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    {p.providerTransactionId ? `${p.providerTransactionId} · ` : ''}{p.provider}
+                    {cab && ` · ${cab.driverName}`}
+                    {receipt && ` · ${receipt.receiptNumber}`}
+                  </div>
+                </div>
+                <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                  <span className="font-bold tabular-nums">KSh {p.amountKSh.toLocaleString()}</span>
+                  {p.status === 'confirmed' && (
+                    <button
+                      onClick={() => setRefundPaymentId(p.id)}
+                      className="text-[9px] text-destructive hover:underline"
+                    >
+                      Refund
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* Refund dialog */}
+      {refundPaymentId && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+              <AlertTriangle className="w-4 h-4" /> Initiate Refund
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Refunding KSh {payments.find(p => p.id === refundPaymentId)?.amountKSh.toLocaleString()} for payment {refundPaymentId}.
+              This action is irreversible and will be audit-logged.
+            </p>
+            <Input
+              value={refundReason}
+              onChange={(e) => setRefundReason(e.target.value)}
+              placeholder="Reason for refund (required)"
+              className="h-9"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                className="flex-1 h-9"
+                disabled={!refundReason.trim()}
+                onClick={handleRefund}
+              >
+                Confirm refund
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 h-9"
+                onClick={() => { setRefundPaymentId(null); setRefundReason(''); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
