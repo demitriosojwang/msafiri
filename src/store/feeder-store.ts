@@ -16,7 +16,16 @@ import {
 } from '@/lib/feeder/seed';
 import { computeTripTiming, nudgeFare, computeFare, canDriverAcceptCharter } from '@/lib/feeder/calc';
 import { computeDriverPosition } from '@/lib/feeder/gps';
-import { createSession, permissionsForRoles } from '@/lib/feeder/rbac';
+import { createSession, permissionsForRoles, detectRolesFromIdentifier } from '@/lib/feeder/rbac';
+import {
+  recordFailedAttempt, isRateLimited, clearAttempts,
+  requires2FA, verify2FA,
+  sanitizeInput, isValidIdentifier,
+  logAction, getAuditLog, clearAuditLog,
+  isSessionExpired, getSessionTimeRemaining,
+  OTP_LOCKOUT_MINUTES,
+  type AuditEntry,
+} from '@/lib/feeder/security';
 import type { Session, DriverPosition, Permission } from '@/lib/feeder/types';
 
 export type Role = 'passenger' | 'driver' | 'admin';
@@ -26,6 +35,11 @@ interface FeederState {
   // Auth / session
   session: Session | null;
   role: Role;                    // = session?.activeRole (kept for backward compat)
+  // Security state
+  loginAttempts: { remaining: number; locked: boolean; lockoutMs: number };
+  needs2FA: boolean;             // true if admin login requires second factor
+  sessionExpiresAt: number | null;  // epoch ms when session times out
+  auditLog: AuditEntry[];
   // GPS tracking
   driverPositions: Record<string, DriverPosition>;  // cabId → live position
   // Core data
@@ -51,9 +65,17 @@ interface FeederState {
   setRole: (r: Role) => void;
   // Auth actions
   login: (identifier: string) => void;
+  loginWith2FA: (identifier: string, otp: string, twoFactorCode?: string) => { success: boolean; error?: string };
   logout: () => void;
   switchRole: (r: Role) => void;
   hasPermission: (p: Permission) => boolean;
+  // Security actions
+  checkRateLimit: (identifier: string) => { limited: boolean; remainingMs: number };
+  recordFailedLogin: (identifier: string) => void;
+  checkSessionExpiry: () => boolean;
+  refreshSession: () => void;
+  logAction: (action: string, entityType: string, entityId?: string, metadata?: Record<string, unknown>) => void;
+  getAuditLog: (limit?: number) => AuditEntry[];
   // GPS actions
   updateDriverPosition: (cabId: string) => void;
   startGpsSimulation: (cabId: string) => void;
@@ -97,6 +119,10 @@ let gpsInterval: ReturnType<typeof setInterval> | null = null;
 export const useFeederStore = create<FeederState>((set, get) => ({
   session: null,
   role: 'passenger',
+  loginAttempts: { remaining: 5, locked: false, lockoutMs: 0 },
+  needs2FA: false,
+  sessionExpiresAt: null,
+  auditLog: [],
   driverPositions: {},
   settings: SETTINGS,
   cabs: SEED_CABS,
@@ -129,16 +155,80 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     // In production, the backend verifies OTP then returns a JWT with the user's roles.
     // Here we simulate by detecting roles from the email/phone identifier.
     const session = createSession(identifier);
-    set({ session, role: session.activeRole });
+    const expiresAt = Date.now() + 15 * 60 * 1000;  // 15-min session
+    set({
+      session,
+      role: session.activeRole,
+      sessionExpiresAt: expiresAt,
+      loginAttempts: { remaining: 5, locked: false, lockoutMs: 0 },
+      needs2FA: false,
+    });
+    // Audit log
+    logAction({
+      actorId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRole,
+      action: 'auth.login',
+      entityType: 'session',
+      entityId: session.userId,
+    });
+    set({ auditLog: getAuditLog(50) });
+  },
+
+  loginWith2FA: (identifier, otp, twoFactorCode) => {
+    // Check rate limit
+    const rateCheck = isRateLimited(identifier);
+    if (rateCheck.limited) {
+      return { success: false, error: `Too many attempts. Try again in ${Math.ceil(rateCheck.remainingMs / 60 / 1000)} minutes.` };
+    }
+
+    // Validate OTP (in production, verified against the OTP sent via SMS/email)
+    // For prototype, any 4-6 digit OTP is accepted
+    if (otp.length < 4) {
+      const result = recordFailedAttempt(identifier);
+      set({ loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: result.locked ? OTP_LOCKOUT_MINUTES * 60 * 1000 : 0 } });
+      return { success: false, error: `Invalid code. ${result.remaining} attempts remaining.` };
+    }
+
+    // Detect roles
+    const { roles } = detectRolesFromIdentifier(identifier);
+
+    // If admin, require 2FA
+    if (requires2FA(roles)) {
+      if (!twoFactorCode) {
+        set({ needs2FA: true });
+        return { success: false, error: 'Admin access requires a second verification code.' };
+      }
+      if (!verify2FA(twoFactorCode)) {
+        const result = recordFailedAttempt(identifier);
+        set({ needs2FA: false, loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: 0 } });
+        return { success: false, error: `Invalid 2FA code. ${result.remaining} attempts remaining.` };
+      }
+    }
+
+    // Success — clear attempts and create session
+    clearAttempts(identifier);
+    get().login(identifier);
+    return { success: true };
   },
 
   logout: () => {
-    // Stop any GPS simulation
+    const session = get().session;
+    if (session) {
+      logAction({
+        actorId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRole,
+        action: 'auth.logout',
+        entityType: 'session',
+        entityId: session.userId,
+      });
+    }
     if (gpsInterval) {
       clearInterval(gpsInterval);
       gpsInterval = null;
     }
-    set({ session: null, role: 'passenger', driverPositions: {} });
+    set({ session: null, role: 'passenger', driverPositions: {}, sessionExpiresAt: null, needs2FA: false, auditLog: getAuditLog(50) });
   },
 
   switchRole: (r) => {
@@ -152,8 +242,59 @@ export const useFeederStore = create<FeederState>((set, get) => ({
   hasPermission: (p) => {
     const session = get().session;
     if (!session) return false;
+    // Check session expiry first
+    if (isSessionExpired(session)) {
+      get().logout();
+      return false;
+    }
     return session.permissions.includes(p);
   },
+
+  // ━━ Security actions ━━
+  checkRateLimit: (identifier) => {
+    const result = isRateLimited(identifier);
+    return result;
+  },
+
+  recordFailedLogin: (identifier) => {
+    const result = recordFailedAttempt(identifier);
+    set({ loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: result.locked ? result.lockoutMin * 60 * 1000 : 0 } });
+  },
+
+  checkSessionExpiry: () => {
+    const session = get().session;
+    if (!session) return false;
+    if (isSessionExpired(session)) {
+      get().logout();
+      return true;
+    }
+    return false;
+  },
+
+  refreshSession: () => {
+    const session = get().session;
+    if (session) {
+      const refreshed = { ...session, loginAt: Date.now() };
+      set({ session: refreshed, sessionExpiresAt: Date.now() + 15 * 60 * 1000 });
+    }
+  },
+
+  logAction: (action, entityType, entityId, metadata) => {
+    const session = get().session;
+    if (!session) return;
+    logAction({
+      actorId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRole,
+      action,
+      entityType,
+      entityId,
+      metadata,
+    });
+    set({ auditLog: getAuditLog(50) });
+  },
+
+  getAuditLog: (limit = 50) => getAuditLog(limit),
 
   // ━━ GPS actions ━━
   updateDriverPosition: (cabId) => {
@@ -218,6 +359,11 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const seatsRequested = state.seatsRequested;
     if (cab.bookedSeats + seatsRequested > cab.capacity) return null;
 
+    // Security: sanitize all user input to prevent XSS
+    const cleanName = sanitizeInput(passengerName);
+    const cleanPickup = sanitizeInput(pickupPoint);
+    if (!cleanName || cleanName.length < 2) return null;
+
     const stage = STAGES.find(s => s.id === cab.stageId)!;
     const fare = computeFare({
       settings: state.settings,
@@ -231,8 +377,8 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const newBooking: Booking = {
       id: bookingId,
       cabId,
-      passengerName,
-      pickupPoint,
+      passengerName: cleanName,
+      pickupPoint: cleanPickup,
       pickupKind: state.pickupKind,
       stageId: cab.stageId,
       offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
@@ -252,6 +398,9 @@ export const useFeederStore = create<FeederState>((set, get) => ({
         c.id === cabId ? { ...c, bookedSeats: c.bookedSeats + seatsRequested } : c,
       ),
     });
+
+    // Audit log
+    get().logAction('booking.create', 'booking', bookingId, { cabId, seats: seatsRequested, fare: fare.perSeat * seatsRequested });
 
     // Recompute fare nudge after booking
     const updated = get().cabs.find(c => c.id === cabId);
@@ -279,6 +428,11 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const check = canDriverAcceptCharter(cab, state.bookings);
     if (!check.allowed) return null;
 
+    // Security: sanitize input
+    const cleanName = sanitizeInput(passengerName);
+    const cleanPickup = sanitizeInput(pickupPoint);
+    if (!cleanName || cleanName.length < 2) return null;
+
     const fare = computeFare({
       settings: state.settings,
       pickupKind: state.pickupKind,
@@ -291,8 +445,8 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     const newBooking: Booking = {
       id: bookingId,
       cabId,
-      passengerName,
-      pickupPoint,
+      passengerName: cleanName,
+      pickupPoint: cleanPickup,
       pickupKind: state.pickupKind,
       stageId: cab.stageId,
       offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
@@ -314,6 +468,8 @@ export const useFeederStore = create<FeederState>((set, get) => ({
           : c,
       ),
     });
+    // Audit log
+    get().logAction('booking.create.charter', 'booking', bookingId, { cabId, seats: cab.capacity, fare: fare.total });
     return bookingId;
   },
 
@@ -584,6 +740,11 @@ export const useFeederStore = create<FeederState>((set, get) => ({
     }
 
     set({ bookings: newBookings, cabs: newCabs });
+
+    // Audit log
+    if (assignedCount > 0) {
+      get().logAction('admin.autoassign', 'train', trainId, { assigned: assignedCount, unassigned: stillUnassigned });
+    }
 
     return { assigned: assignedCount, unassigned: stillUnassigned, details };
   },

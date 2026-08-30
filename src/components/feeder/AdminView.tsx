@@ -37,7 +37,7 @@ export function AdminView() {
   const bookings = useFeederStore(s => s.bookings);
   const requests = useFeederStore(s => s.requests);
   const settings = useFeederStore(s => s.settings);
-  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters' | 'autoassign'>('arrivals');
+  const [tab, setTab] = useState<'arrivals' | 'departures' | 'stages' | 'charters' | 'autoassign' | 'audit'>('arrivals');
 
   // Aggregate metrics
   const metrics = useMemo(() => {
@@ -169,7 +169,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid grid-cols-5 w-full">
+        <TabsList className="grid grid-cols-6 w-full">
           <TabsTrigger value="arrivals" className="text-xs flex items-center gap-1">
             <Anchor className="w-3 h-3" /> Arrivals
           </TabsTrigger>
@@ -183,7 +183,10 @@ export function AdminView() {
             <Crown className="w-3 h-3" /> Charters
           </TabsTrigger>
           <TabsTrigger value="autoassign" className="text-xs flex items-center gap-1">
-            <Zap className="w-3 h-3" /> Auto-Assign
+            <Zap className="w-3 h-3" /> Auto
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="text-xs flex items-center gap-1">
+            <Shield className="w-3 h-3" /> Audit
           </TabsTrigger>
         </TabsList>
 
@@ -323,7 +326,83 @@ export function AdminView() {
         <TabsContent value="autoassign" className="mt-3 space-y-3">
           <AutoAssignPanel />
         </TabsContent>
+
+        <TabsContent value="audit" className="mt-3 space-y-3">
+          <AuditLogPanel />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function AuditLogPanel() {
+  const auditLog = useFeederStore(s => s.auditLog);
+
+  return (
+    <div className="space-y-3">
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <Shield className="w-4 h-4 text-primary" /> Audit Log
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Every state-changing action is logged: who did what, when, and to what.
+            In production, this is an append-only PostgreSQL table retained for 7 years.
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-[10px]">
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">Append-only</div>
+              <div className="text-muted-foreground">Never edited or deleted</div>
+            </div>
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">7-year retention</div>
+              <div className="text-muted-foreground">For disputes & forensics</div>
+            </div>
+            <div className="rounded bg-card border p-2">
+              <div className="font-medium text-foreground">IP tracked</div>
+              <div className="text-muted-foreground">Server-side capture</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span>Recent activity</span>
+            <Badge variant="secondary" className="text-[10px]">{auditLog.length} entries</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-1">
+          {auditLog.length === 0 && (
+            <div className="text-center text-sm text-muted-foreground py-6">
+              No activity logged yet. Log in, book a trip, or run auto-assignment to see entries.
+            </div>
+          )}
+          {auditLog.map(entry => (
+            <div key={entry.id} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-secondary/30 text-xs border-b last:border-0">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                    {entry.action}
+                  </span>
+                  <span className="font-medium">{entry.actorName}</span>
+                  <span className="text-[10px] text-muted-foreground">({entry.actorRole})</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  {entry.entityType}{entry.entityId ? `: ${entry.entityId}` : ''}
+                  {entry.metadata && Object.keys(entry.metadata).length > 0 && (
+                    <span> · {JSON.stringify(entry.metadata)}</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                {new Date(entry.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

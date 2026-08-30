@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,8 +35,18 @@ export function FeederApp() {
   const session = useFeederStore(s => s.session);
   const setRole = useFeederStore(s => s.setRole);
   const logout = useFeederStore(s => s.logout);
+  const checkSessionExpiry = useFeederStore(s => s.checkSessionExpiry);
   const [showSplash, setShowSplash] = useState(true);
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Check session expiry every 30 seconds
+  useEffect(() => {
+    if (!session) return;
+    const interval = setInterval(() => {
+      checkSessionExpiry();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [session, checkSessionExpiry]);
 
   // If splash is done and no session, show login screen
   if (!showSplash && !session) {
