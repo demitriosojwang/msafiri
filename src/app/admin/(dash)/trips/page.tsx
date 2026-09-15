@@ -42,6 +42,7 @@ interface AdminTrip {
   bookedSeats: number;
   lockReason: string | null;
   source: string;
+  train: { name: string; mtmTime: string; ntmTime: string; eventKind: "departs_mtm" | "arrives_mtm" } | null;
   driver: { id: string; name: string; plate: string; phone: string; mpesaNumber: string } | null;
   manifest: ManifestLine[];
 }
@@ -153,11 +154,18 @@ export default function AdminTrips() {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">
-                      {fmtTime(t.departureAt)} · {t.direction === "FROM_TERMINUS" ? "Terminus → Stage" : "Stage → Terminus"}
+                      {fmtTime(t.departureAt)} · {t.direction === "FROM_TERMINUS" ? "Terminus → drop-off" : "Pickup → Terminus"}
                     </span>
                     <TripStatusBadge status={t.status} />
                     {t.source === "auto" && <Badge variant="outline">auto-created</Badge>}
                     {t.lockReason && <Badge variant="outline">locked: {t.lockReason === "cutoff" ? "refund cutoff" : "seat fill"}</Badge>}
+                    {t.train && (
+                      <Badge variant="secondary">
+                        {t.direction === "FROM_TERMINUS"
+                          ? `meets ${t.train.name} (arr MTM ${t.train.mtmTime})`
+                          : `catches ${t.train.name} (dep MTM ${t.train.mtmTime})`}
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {t.routeName} · {fmtDate(t.departureAt)} ·{" "}

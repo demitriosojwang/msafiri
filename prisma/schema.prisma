@@ -39,6 +39,23 @@ model Driver {
 
 // ─── Network ─────────────────────────────────────────────────────────────────
 
+// The Madaraka Express services Mi-Reli synchronizes with (MTM = Mombasa
+// Terminus, NTM = Nairobi Terminus). Feeder cabs are timed to these events:
+//   · MBA_TO_NBO trains DEPART MTM  → TO_TERMINUS shuttles arrive there early
+//   · NBO_TO_MBA trains ARRIVE MTM  → FROM_TERMINUS shuttles meet them
+model Train {
+  id            String  @id @default(cuid())
+  name          String // Inter-County | Express | Night Train
+  direction     String // MBA_TO_NBO | NBO_TO_MBA
+  originCode    String // MTM | NTM
+  destCode      String // MTM | NTM
+  originTime    String // "HH:MM" departure at origin terminus
+  destTime      String // "HH:MM" arrival at destination terminus
+  destDayOffset Int     @default(0) // 1 when arrival is next calendar day (night train)
+  active        Boolean @default(true)
+  trips         Trip[]
+}
+
 model Route {
   id             String       @id @default(cuid())
   name           String
@@ -80,6 +97,8 @@ model Trip {
   departedAt   DateTime?
   completedAt  DateTime?
   source       String       @default("schedule") // schedule | auto
+  trainId      String?
+  train        Train?       @relation(fields: [trainId], references: [id])
   bookings     Booking[]
   payouts      PayoutRecord[]
   createdAt    DateTime     @default(now())
@@ -223,6 +242,8 @@ model PlatformConfig {
   sweepPendingMinutes        Int       @default(5) // STK ambiguity → Transaction Status sweep
   tripHorizonDays            Int       @default(2)
   bookingWindowMinutes       Int       @default(15) // min minutes before departure to book
+  terminusArrivalBufferMinutes Int     @default(60) // TO_TERMINUS cabs reach MTM this early before train departure
+  trainMeetBufferMinutes     Int       @default(45) // FROM_TERMINUS cabs leave MTM this long after train arrival
   adminEmails                String    @default("[\"demitri@mireli.co.ke\",\"admin@mireli.co.ke\"]")
   admin2faCode               String    @default("mireli2026")
   lastPayoutRunAt            DateTime?

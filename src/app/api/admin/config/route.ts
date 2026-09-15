@@ -22,6 +22,8 @@ export async function GET() {
       sweepPendingMinutes: cfg.sweepPendingMinutes,
       tripHorizonDays: cfg.tripHorizonDays,
       bookingWindowMinutes: cfg.bookingWindowMinutes,
+      terminusArrivalBufferMinutes: cfg.terminusArrivalBufferMinutes,
+      trainMeetBufferMinutes: cfg.trainMeetBufferMinutes,
       adminEmails: JSON.parse(cfg.adminEmails),
       admin2faCode: cfg.admin2faCode,
     },
@@ -101,6 +103,16 @@ export async function PUT(req: NextRequest) {
     const v = parseInt(body.bookingWindowMinutes, 10);
     if (Number.isNaN(v) || v < 0 || v > 240) return NextResponse.json({ error: "Booking window must be 0–240 minutes" }, { status: 400 });
     data.bookingWindowMinutes = v;
+  }
+  if (body.terminusArrivalBufferMinutes !== undefined) {
+    const v = parseInt(body.terminusArrivalBufferMinutes, 10);
+    if (Number.isNaN(v) || v < 0 || v > 180) return NextResponse.json({ error: "Terminus arrival buffer must be 0–180 minutes" }, { status: 400 });
+    data.terminusArrivalBufferMinutes = v;
+  }
+  if (body.trainMeetBufferMinutes !== undefined) {
+    const v = parseInt(body.trainMeetBufferMinutes, 10);
+    if (Number.isNaN(v) || v < 0 || v > 180) return NextResponse.json({ error: "Train meet buffer must be 0–180 minutes" }, { status: 400 });
+    data.trainMeetBufferMinutes = v;
   }
   if (Array.isArray(body.adminEmails)) {
     const emails = body.adminEmails.map((e: string) => String(e).trim().toLowerCase()).filter(Boolean);

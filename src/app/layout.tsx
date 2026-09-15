@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Mi-Reli — Reliable rides from the SGR terminus",
   description:
-    "Mi-Reli connects SGR passengers in Mombasa with reliable feeder cabs: book a seat or a private charter from Miritini Terminus to your stage — or get picked up at home. Pay with M-Pesa.",
-  keywords: ["Mi-Reli", "Mombasa", "SGR", "feeder", "cab", "M-Pesa", "Miritini", "Likoni"],
+    "Mi-Reli shuttles SGR passengers between Mombasa Terminus (MTM) and the coast: shared-ride pickup and drop-off points across the North Coast (Bamburi, Nyali, Mtwapa, Malindi) and South Coast (Likoni, Diani) — every cab timed to a Madaraka Express departure or arrival. Pay with M-Pesa.",
+  keywords: ["Mi-Reli", "Mombasa", "SGR", "Madaraka Express", "Mombasa Terminus", "feeder", "cab", "M-Pesa", "Nyali", "Bamburi", "Mtwapa", "Likoni", "Diani"],
   icons: {
     icon: "/favicon.svg",
   },

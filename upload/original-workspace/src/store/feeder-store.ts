@@ -1,0 +1,958 @@
+'use client';
+
+import { create } from 'zustand';
+import type { Booking, Cab, PickupRequest, Settings, BookingKind, PickupKind, Payment, Receipt, Rating } from '@/lib/feeder/types';
+import {
+  DRIVER_STATS,
+  SEED_BOOKINGS,
+  SEED_UNASSIGNED,
+  SEED_CABS,
+  SEED_REQUESTS,
+  SETTINGS,
+  STAGES,
+  TRAINS,
+  ACTIVE_DRIVER_ID,
+  todayStr,
+} from '@/lib/feeder/seed';
+import { computeTripTiming, nudgeFare, computeFare, canDriverAcceptCharter } from '@/lib/feeder/calc';
+import { computeDriverPosition } from '@/lib/feeder/gps';
+import { createSession, permissionsForRoles, detectRolesFromIdentifier } from '@/lib/feeder/rbac';
+import {
+  recordFailedAttempt, isRateLimited, clearAttempts,
+  requires2FA, verify2FA,
+  sanitizeInput, isValidIdentifier,
+  logAction, getAuditLog, clearAuditLog,
+  isSessionExpired, getSessionTimeRemaining,
+  OTP_LOCKOUT_MINUTES,
+  type AuditEntry,
+} from '@/lib/feeder/security';
+import type { Session, DriverPosition, Permission } from '@/lib/feeder/types';
+
+export type Role = 'passenger' | 'driver' | 'admin';
+export type PassengerDirection = 'inbound' | 'outbound';
+
+interface FeederState {
+  // Auth / session
+  session: Session | null;
+  role: Role;                    // = session?.activeRole (kept for backward compat)
+  // Security state
+  loginAttempts: { remaining: number; locked: boolean; lockoutMs: number };
+  needs2FA: boolean;             // true if admin login requires second factor
+  sessionExpiresAt: number | null;  // epoch ms when session times out
+  auditLog: AuditEntry[];
+  // GPS tracking
+  driverPositions: Record<string, DriverPosition>;  // cabId → live position
+  // Core data
+  settings: Settings;
+  cabs: Cab[];
+  bookings: Booking[];
+  requests: PickupRequest[];
+  // Passenger view state
+  passengerDirection: PassengerDirection;
+  selectedDate: string;            // YYYY-MM-DD
+  selectedTrainId: string;
+  selectedStageId: string | null;
+  // Booking form state
+  pickupKind: PickupKind;
+  offStageDistanceKm: number;
+  bookingKind: BookingKind;
+  seatsRequested: number;          // how many seats the passenger wants (pooled only)
+  // Driver view state
+  activeDriverCabId: string;
+  driverStats: typeof DRIVER_STATS;
+  // Payment state
+  payments: Payment[];
+  receipts: Receipt[];
+  ratings: Rating[];
+
+  // Actions
+  setRole: (r: Role) => void;
+  // Auth actions
+  login: (identifier: string) => void;
+  loginWith2FA: (identifier: string, otp: string, twoFactorCode?: string) => { success: boolean; error?: string };
+  logout: () => void;
+  switchRole: (r: Role) => void;
+  hasPermission: (p: Permission) => boolean;
+  // Security actions
+  checkRateLimit: (identifier: string) => { limited: boolean; remainingMs: number };
+  recordFailedLogin: (identifier: string) => void;
+  checkSessionExpiry: () => boolean;
+  refreshSession: () => void;
+  logAction: (action: string, entityType: string, entityId?: string, metadata?: Record<string, unknown>) => void;
+  getAuditLog: (limit?: number) => AuditEntry[];
+  // GPS actions
+  updateDriverPosition: (cabId: string) => void;
+  startGpsSimulation: (cabId: string) => void;
+  stopGpsSimulation: () => void;
+  setPassengerDirection: (d: PassengerDirection) => void;
+  setSelectedDate: (d: string) => void;
+  setSelectedTrainId: (id: string) => void;
+  setSelectedStageId: (id: string | null) => void;
+  setPickupKind: (k: PickupKind) => void;
+  setOffStageDistanceKm: (km: number) => void;
+  setBookingKind: (k: BookingKind) => void;
+  setSeatsRequested: (n: number) => void;
+
+  bookSeat: (cabId: string, passengerName: string, pickupPoint: string, hasTicket: boolean) => string | null;
+  bookCharter: (cabId: string, passengerName: string, pickupPoint: string, hasTicket: boolean) => string | null;
+  cancelBooking: (bookingId: string) => void;
+  acceptRequest: (requestId: string, cabId: string) => void;
+  acceptCharterRequest: (requestId: string, cabId: string) => void;
+  declineRequest: (requestId: string) => void;
+  startTrip: (cabId: string) => void;
+  completeTrip: (cabId: string) => void;
+  assignCabToStage: (cabId: string, stageId: string) => void;
+  autoAssign: (trainId: string) => { assigned: number; unassigned: number; details: string[] };
+  // Payment actions
+  initiatePayment: (bookingId: string, phoneNumber: string) => Payment | null;
+  confirmPayment: (paymentId: string) => Receipt | null;
+  failPayment: (paymentId: string, reason: string) => void;
+  getPaymentForBooking: (bookingId: string) => Payment | undefined;
+  getReceiptForBooking: (bookingId: string) => Receipt | undefined;
+  // Rating actions
+  submitRating: (bookingId: string, stars: number, comment?: string) => void;
+  getRatingForBooking: (bookingId: string) => Rating | undefined;
+
+  // Selectors
+  getCab: (id: string) => Cab | undefined;
+  getStage: (id: string) => typeof STAGES[0] | undefined;
+  getTrain: (id: string) => typeof TRAINS[0] | undefined;
+  getCabsForTrain: (trainId: string) => Cab[];
+  getCabsForStage: (stageId: string, direction: Direction) => Cab[];
+  getBookingsForCab: (cabId: string) => Booking[];
+  getRequestsForDriver: (cabId: string) => PickupRequest[];
+  getCharterRequestsForDriver: (cabId: string) => PickupRequest[];
+  getPassengersWaitingAtStage: (stageId: string) => number;
+}
+
+type Direction = 'inbound' | 'outbound';
+
+let bookingCounter = 100;
+let gpsInterval: ReturnType<typeof setInterval> | null = null;
+
+export const useFeederStore = create<FeederState>((set, get) => ({
+  session: null,
+  role: 'passenger',
+  loginAttempts: { remaining: 5, locked: false, lockoutMs: 0 },
+  needs2FA: false,
+  sessionExpiresAt: null,
+  auditLog: [],
+  driverPositions: {},
+  settings: SETTINGS,
+  cabs: SEED_CABS,
+  bookings: [...SEED_BOOKINGS, ...SEED_UNASSIGNED],
+  requests: SEED_REQUESTS,
+  passengerDirection: 'inbound',
+  selectedDate: todayStr(),
+  selectedTrainId: 't-dep-2',
+  selectedStageId: null,
+  pickupKind: 'stage',
+  offStageDistanceKm: 0,
+  bookingKind: 'pooled',
+  seatsRequested: 1,
+  activeDriverCabId: ACTIVE_DRIVER_ID,
+  driverStats: DRIVER_STATS,
+  payments: [],
+  receipts: [],
+  ratings: [],
+
+  setRole: (r) => {
+    // Switch active role if the session supports it (multi-role accounts)
+    const session = get().session;
+    if (session && session.roles.includes(r)) {
+      const updated = { ...session, activeRole: r, permissions: permissionsForRoles(session.roles) };
+      set({ session: updated, role: r });
+    } else {
+      set({ role: r });
+    }
+  },
+
+  // ━━ Auth actions ━━
+  login: (identifier: string) => {
+    // In production, the backend verifies OTP then returns a JWT with the user's roles.
+    // Here we simulate by detecting roles from the email/phone identifier.
+    const session = createSession(identifier);
+    const expiresAt = Date.now() + 15 * 60 * 1000;  // 15-min session
+    set({
+      session,
+      role: session.activeRole,
+      sessionExpiresAt: expiresAt,
+      loginAttempts: { remaining: 5, locked: false, lockoutMs: 0 },
+      needs2FA: false,
+    });
+    // Audit log
+    logAction({
+      actorId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRole,
+      action: 'auth.login',
+      entityType: 'session',
+      entityId: session.userId,
+    });
+    set({ auditLog: getAuditLog(50) });
+  },
+
+  loginWith2FA: (identifier, otp, twoFactorCode) => {
+    // Check rate limit
+    const rateCheck = isRateLimited(identifier);
+    if (rateCheck.limited) {
+      return { success: false, error: `Too many attempts. Try again in ${Math.ceil(rateCheck.remainingMs / 60 / 1000)} minutes.` };
+    }
+
+    // Validate OTP (in production, verified against the OTP sent via SMS/email)
+    // For prototype, any 4-6 digit OTP is accepted
+    if (otp.length < 4) {
+      const result = recordFailedAttempt(identifier);
+      set({ loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: result.locked ? OTP_LOCKOUT_MINUTES * 60 * 1000 : 0 } });
+      return { success: false, error: `Invalid code. ${result.remaining} attempts remaining.` };
+    }
+
+    // Detect roles
+    const { roles } = detectRolesFromIdentifier(identifier);
+
+    // If admin, require 2FA
+    if (requires2FA(roles)) {
+      if (!twoFactorCode) {
+        set({ needs2FA: true });
+        return { success: false, error: 'Admin access requires a second verification code.' };
+      }
+      if (!verify2FA(twoFactorCode)) {
+        const result = recordFailedAttempt(identifier);
+        set({ needs2FA: false, loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: 0 } });
+        return { success: false, error: `Invalid 2FA code. ${result.remaining} attempts remaining.` };
+      }
+    }
+
+    // Success — clear attempts and create session
+    clearAttempts(identifier);
+    get().login(identifier);
+    return { success: true };
+  },
+
+  logout: () => {
+    const session = get().session;
+    if (session) {
+      logAction({
+        actorId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRole,
+        action: 'auth.logout',
+        entityType: 'session',
+        entityId: session.userId,
+      });
+    }
+    if (gpsInterval) {
+      clearInterval(gpsInterval);
+      gpsInterval = null;
+    }
+    set({ session: null, role: 'passenger', driverPositions: {}, sessionExpiresAt: null, needs2FA: false, auditLog: getAuditLog(50) });
+  },
+
+  switchRole: (r) => {
+    const session = get().session;
+    if (session && session.roles.includes(r)) {
+      const updated = { ...session, activeRole: r };
+      set({ session: updated, role: r });
+    }
+  },
+
+  hasPermission: (p) => {
+    const session = get().session;
+    if (!session) return false;
+    // Check session expiry first
+    if (isSessionExpired(session)) {
+      get().logout();
+      return false;
+    }
+    return session.permissions.includes(p);
+  },
+
+  // ━━ Security actions ━━
+  checkRateLimit: (identifier) => {
+    const result = isRateLimited(identifier);
+    return result;
+  },
+
+  recordFailedLogin: (identifier) => {
+    const result = recordFailedAttempt(identifier);
+    set({ loginAttempts: { remaining: result.remaining, locked: result.locked, lockoutMs: result.locked ? result.lockoutMin * 60 * 1000 : 0 } });
+  },
+
+  checkSessionExpiry: () => {
+    const session = get().session;
+    if (!session) return false;
+    if (isSessionExpired(session)) {
+      get().logout();
+      return true;
+    }
+    return false;
+  },
+
+  refreshSession: () => {
+    const session = get().session;
+    if (session) {
+      const refreshed = { ...session, loginAt: Date.now() };
+      set({ session: refreshed, sessionExpiresAt: Date.now() + 15 * 60 * 1000 });
+    }
+  },
+
+  logAction: (action, entityType, entityId, metadata) => {
+    const session = get().session;
+    if (!session) return;
+    logAction({
+      actorId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRole,
+      action,
+      entityType,
+      entityId,
+      metadata,
+    });
+    set({ auditLog: getAuditLog(50) });
+  },
+
+  getAuditLog: (limit = 50) => getAuditLog(limit),
+
+  // ━━ GPS actions ━━
+  updateDriverPosition: (cabId) => {
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const stage = STAGES.find(s => s.id === cab.stageId);
+    if (!stage) return;
+
+    const currentPos = get().driverPositions[cabId];
+    const currentProgress = currentPos?.routeProgress ?? 0;
+
+    // Advance progress by a small increment (simulates 15s of driving)
+    const increment = 0.02 + Math.random() * 0.01;
+    const newProgress = Math.min(0.95, currentProgress + increment); // cap at 95% so it never "arrives" in sim
+
+    const newPos = computeDriverPosition(cabId, stage, cab.direction, newProgress);
+    set({
+      driverPositions: { ...get().driverPositions, [cabId]: newPos },
+    });
+  },
+
+  startGpsSimulation: (cabId) => {
+    // Stop any existing simulation
+    if (gpsInterval) clearInterval(gpsInterval);
+    // Initialize position at progress 0
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const stage = STAGES.find(s => s.id === cab.stageId);
+    if (!stage) return;
+    const initialPos = computeDriverPosition(cabId, stage, cab.direction, 0);
+    set({ driverPositions: { ...get().driverPositions, [cabId]: initialPos } });
+    // Update every 3 seconds (prototype speed; production would be 15s)
+    gpsInterval = setInterval(() => {
+      get().updateDriverPosition(cabId);
+    }, 3000);
+  },
+
+  stopGpsSimulation: () => {
+    if (gpsInterval) {
+      clearInterval(gpsInterval);
+      gpsInterval = null;
+    }
+  },
+
+  setPassengerDirection: (d) => {
+    const trainId = d === 'inbound' ? 't-dep-2' : 't-arr-2';
+    set({ passengerDirection: d, selectedTrainId: trainId, selectedStageId: null });
+  },
+  setSelectedDate: (d) => set({ selectedDate: d }),
+  setSelectedTrainId: (id) => set({ selectedTrainId: id, selectedStageId: null }),
+  setSelectedStageId: (id) => set({ selectedStageId: id }),
+  setPickupKind: (k) => set({ pickupKind: k }),
+  setOffStageDistanceKm: (km) => set({ offStageDistanceKm: km }),
+  setBookingKind: (k) => set({ bookingKind: k, ...(k === 'charter' ? { seatsRequested: 0 } : { seatsRequested: 1 }) }),
+  setSeatsRequested: (n) => set({ seatsRequested: Math.max(1, Math.min(14, n)) }),
+
+  bookSeat: (cabId, passengerName, pickupPoint, hasTicket) => {
+    const state = get();
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return null;
+    if (cab.charterLocked) return null;
+    const seatsRequested = state.seatsRequested;
+    if (cab.bookedSeats + seatsRequested > cab.capacity) return null;
+
+    // Security: sanitize all user input to prevent XSS
+    const cleanName = sanitizeInput(passengerName);
+    const cleanPickup = sanitizeInput(pickupPoint);
+    if (!cleanName || cleanName.length < 2) return null;
+
+    const stage = STAGES.find(s => s.id === cab.stageId)!;
+    const fare = computeFare({
+      settings: state.settings,
+      pickupKind: state.pickupKind,
+      offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
+      kind: 'pooled',
+      capacity: cab.capacity,
+    });
+
+    const bookingId = `b-${++bookingCounter}`;
+    const newBooking: Booking = {
+      id: bookingId,
+      cabId,
+      passengerName: cleanName,
+      pickupPoint: cleanPickup,
+      pickupKind: state.pickupKind,
+      stageId: cab.stageId,
+      offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
+      hasTicket,
+      direction: cab.direction,
+      status: 'awaiting_payment' as const,
+      kind: 'pooled',
+      seatsReserved: seatsRequested,
+      farePaid: fare.perSeat * seatsRequested,
+      createdAt: Date.now(),
+      isMine: true,
+    };
+
+    set({
+      bookings: [...state.bookings, newBooking],
+      cabs: state.cabs.map(c =>
+        c.id === cabId ? { ...c, bookedSeats: c.bookedSeats + seatsRequested } : c,
+      ),
+    });
+
+    // Audit log
+    get().logAction('booking.create', 'booking', bookingId, { cabId, seats: seatsRequested, fare: fare.perSeat * seatsRequested });
+
+    // Recompute fare nudge after booking
+    const updated = get().cabs.find(c => c.id === cabId);
+    if (updated) {
+      const train = TRAINS.find(t => t.id === updated.trainId)!;
+      const timing = computeTripTiming(updated, stage, train, state.settings, hasTicket, undefined, get().selectedDate);
+      const newFare = nudgeFare(updated, timing, state.settings);
+      if (newFare !== updated.currentFare) {
+        set({
+          cabs: get().cabs.map(c =>
+            c.id === cabId ? { ...c, currentFare: newFare } : c,
+          ),
+        });
+      }
+    }
+    return bookingId;
+  },
+
+  bookCharter: (cabId, passengerName, pickupPoint, hasTicket) => {
+    const state = get();
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return null;
+    if (cab.charterLocked) return null;
+    // Charter requires empty cab (no pooled bookings)
+    const check = canDriverAcceptCharter(cab, state.bookings);
+    if (!check.allowed) return null;
+
+    // Security: sanitize input
+    const cleanName = sanitizeInput(passengerName);
+    const cleanPickup = sanitizeInput(pickupPoint);
+    if (!cleanName || cleanName.length < 2) return null;
+
+    const fare = computeFare({
+      settings: state.settings,
+      pickupKind: state.pickupKind,
+      offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
+      kind: 'charter',
+      capacity: cab.capacity,
+    });
+
+    const bookingId = `b-${++bookingCounter}`;
+    const newBooking: Booking = {
+      id: bookingId,
+      cabId,
+      passengerName: cleanName,
+      pickupPoint: cleanPickup,
+      pickupKind: state.pickupKind,
+      stageId: cab.stageId,
+      offStageDistanceKm: state.pickupKind === 'off-stage' ? state.offStageDistanceKm : undefined,
+      hasTicket,
+      direction: cab.direction,
+      status: 'awaiting_payment' as const,
+      kind: 'charter',
+      seatsReserved: cab.capacity,
+      farePaid: fare.total,
+      createdAt: Date.now(),
+      isMine: true,
+    };
+
+    set({
+      bookings: [...state.bookings, newBooking],
+      cabs: state.cabs.map(c =>
+        c.id === cabId
+          ? { ...c, charterLocked: true, bookedSeats: c.capacity }
+          : c,
+      ),
+    });
+    // Audit log
+    get().logAction('booking.create.charter', 'booking', bookingId, { cabId, seats: cab.capacity, fare: fare.total });
+    return bookingId;
+  },
+
+  cancelBooking: (bookingId) => {
+    const state = get();
+    const booking = state.bookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    const cab = state.cabs.find(c => c.id === booking.cabId);
+    if (!cab) return;
+
+    const wasCharter = booking.kind === 'charter';
+    const seats = booking.seatsReserved;
+    set({
+      bookings: state.bookings.map(b =>
+        b.id === bookingId ? { ...b, status: 'cancelled' as const } : b,
+      ),
+      cabs: state.cabs.map(c => {
+        if (c.id !== booking.cabId) return c;
+        if (wasCharter) {
+          return { ...c, charterLocked: false, bookedSeats: 0 };
+        }
+        return { ...c, bookedSeats: Math.max(0, c.bookedSeats - seats) };
+      }),
+    });
+  },
+
+  acceptRequest: (requestId, cabId) => {
+    const state = get();
+    const req = state.requests.find(r => r.id === requestId);
+    if (!req) return;
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    if (cab.charterLocked) return;
+
+    const fare = computeFare({
+      settings: state.settings,
+      pickupKind: req.pickupKind,
+      offStageDistanceKm: req.offStageDistanceKm,
+      kind: 'pooled',
+      capacity: cab.capacity,
+    });
+
+    const newBookings: Booking[] = [];
+    for (let i = 0; i < req.seatsRequested; i++) {
+      if (cab.bookedSeats + i >= cab.capacity) break;
+      newBookings.push({
+        id: `b-${++bookingCounter}`,
+        cabId,
+        passengerName: i === 0 ? req.passengerName : `${req.passengerName} +${i}`,
+        pickupPoint: req.pickupPoint,
+        pickupKind: req.pickupKind,
+        stageId: req.stageId || cab.stageId,
+        offStageDistanceKm: req.offStageDistanceKm,
+        hasTicket: req.hasTicket,
+        direction: cab.direction,
+        status: 'reserved',
+        kind: 'pooled',
+        seatsReserved: 1,
+        farePaid: fare.perSeat,
+        createdAt: Date.now(),
+      });
+    }
+
+    set({
+      requests: state.requests.map(r =>
+        r.id === requestId ? { ...r, status: 'accepted' as const } : r,
+      ),
+      bookings: [...state.bookings, ...newBookings],
+      cabs: state.cabs.map(c =>
+        c.id === cabId
+          ? { ...c, bookedSeats: Math.min(c.capacity, c.bookedSeats + newBookings.length) }
+          : c,
+      ),
+    });
+  },
+
+  acceptCharterRequest: (requestId, cabId) => {
+    const state = get();
+    const req = state.requests.find(r => r.id === requestId);
+    if (!req || req.kind !== 'charter') return;
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return;
+
+    const check = canDriverAcceptCharter(cab, state.bookings);
+    if (!check.allowed) return;
+
+    const fare = computeFare({
+      settings: state.settings,
+      pickupKind: req.pickupKind,
+      offStageDistanceKm: req.offStageDistanceKm,
+      kind: 'charter',
+      capacity: cab.capacity,
+    });
+
+    const newBooking: Booking = {
+      id: `b-${++bookingCounter}`,
+      cabId,
+      passengerName: req.passengerName,
+      pickupPoint: req.pickupPoint,
+      pickupKind: req.pickupKind,
+      stageId: req.stageId || cab.stageId,
+      offStageDistanceKm: req.offStageDistanceKm,
+      hasTicket: req.hasTicket,
+      direction: cab.direction,
+      status: 'awaiting_payment' as const,
+      kind: 'charter',
+      seatsReserved: cab.capacity,
+      farePaid: fare.total,
+      createdAt: Date.now(),
+    };
+
+    set({
+      requests: state.requests.map(r =>
+        r.id === requestId ? { ...r, status: 'accepted' as const } : r,
+      ),
+      bookings: [...state.bookings, newBooking],
+      cabs: state.cabs.map(c =>
+        c.id === cabId
+          ? { ...c, charterLocked: true, bookedSeats: c.capacity }
+          : c,
+      ),
+    });
+  },
+
+  declineRequest: (requestId) => {
+    set({
+      requests: get().requests.map(r =>
+        r.id === requestId ? { ...r, status: 'declined' as const } : r,
+      ),
+    });
+  },
+
+  startTrip: (cabId) => {
+    const state = get();
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const isCharter = cab.charterLocked;
+
+    set({
+      cabs: state.cabs.map(c =>
+        c.id === cabId ? { ...c, status: 'departed' as const, departedAt: Date.now() } : c,
+      ),
+      bookings: state.bookings.map(b =>
+        b.cabId === cabId ? { ...b, status: 'confirmed' as const } : b,
+      ),
+    });
+    get().logAction('trip.start', 'cab', cabId);
+  },
+
+  completeTrip: (cabId) => {
+    const state = get();
+    const cab = state.cabs.find(c => c.id === cabId);
+    if (!cab) return;
+    const isCharter = cab.charterLocked;
+    const tripBookings = state.bookings.filter(b => b.cabId === cabId && b.status !== 'cancelled');
+    const earnings = tripBookings.reduce((sum, b) => sum + b.farePaid, 0);
+
+    set({
+      cabs: state.cabs.map(c =>
+        c.id === cabId ? { ...c, status: 'arrived' as const } : c,
+      ),
+      bookings: state.bookings.map(b =>
+        b.cabId === cabId ? { ...b, status: 'completed' as const } : b,
+      ),
+      driverStats: {
+        ...state.driverStats,
+        tripsCompleted: state.driverStats.tripsCompleted + 1,
+        seatsFilled: state.driverStats.seatsFilled + cab.bookedSeats,
+        seatsOffered: state.driverStats.seatsOffered + cab.capacity,
+        chartersCompleted: state.driverStats.chartersCompleted + (isCharter ? 1 : 0),
+        todayEarningsKSh: state.driverStats.todayEarningsKSh + earnings,
+      },
+    });
+    get().logAction('trip.complete', 'cab', cabId, { earnings });
+  },
+
+  // ━━ Payment actions ━━
+  initiatePayment: (bookingId, phoneNumber) => {
+    const state = get();
+    const booking = state.bookings.find(b => b.id === bookingId);
+    if (!booking) return null;
+
+    // Check for existing pending payment (idempotency)
+    const existing = state.payments.find(p => p.bookingId === bookingId && p.status === 'pending');
+    if (existing) return existing;
+
+    const paymentId = `pay-${Date.now()}`;
+    const payment: Payment = {
+      id: paymentId,
+      bookingId,
+      amountKSh: booking.farePaid,
+      status: 'stk_push_sent',
+      provider: 'mpesa',
+      providerRequestRef: `CRID-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+      idempotencyKey: `idem-${Date.now()}`,
+      phoneNumber: sanitizeInput(phoneNumber),
+      initiatedAt: Date.now(),
+    };
+
+    set({
+      payments: [...state.payments, payment],
+      bookings: state.bookings.map(b =>
+        b.id === bookingId ? { ...b, status: 'awaiting_payment' as const } : b,
+      ),
+    });
+    get().logAction('payment.initiate', 'payment', paymentId, { bookingId, amount: booking.farePaid });
+    return payment;
+  },
+
+  confirmPayment: (paymentId) => {
+    const state = get();
+    const payment = state.payments.find(p => p.id === paymentId);
+    if (!payment) return null;
+    const booking = state.bookings.find(b => b.id === payment.bookingId);
+    if (!booking) return null;
+    const cab = booking.cabId ? state.cabs.find(c => c.id === booking.cabId) : undefined;
+    const stage = booking.stageId ? STAGES.find(s => s.id === booking.stageId) : undefined;
+    const train = cab ? TRAINS.find(t => t.id === cab.trainId) : undefined;
+
+    // Generate M-Pesa transaction ID (format: 4 letters + 6 alphanumeric)
+    const txnId = Array.from({ length: 4 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]).join('') +
+                  Math.random().toString(36).slice(2, 8).toUpperCase();
+
+    // Generate receipt number (format: MSF-XX99XX)
+    const receiptNum = `MSF-${Math.random().toString(36).slice(2, 4).toUpperCase()}${Math.floor(Math.random() * 90 + 10)}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
+
+    const receipt: Receipt = {
+      id: `rcpt-${Date.now()}`,
+      bookingId: booking.id,
+      paymentId: payment.id,
+      receiptNumber: receiptNum,
+      amountKSh: payment.amountKSh,
+      passengerName: booking.passengerName,
+      route: stage ? `${stage.name} → ${train?.destination ?? 'Terminus'}` : booking.pickupPoint,
+      trainCode: train?.code ?? 'N/A',
+      trainTime: train?.time ?? 'N/A',
+      date: state.selectedDate,
+      seats: booking.seatsReserved,
+      cabType: cab?.cabType,
+      driverName: cab?.driverName,
+      plateNumber: cab?.plateNumber,
+      transactionId: txnId,
+      issuedAt: Date.now(),
+    };
+
+    set({
+      payments: state.payments.map(p =>
+        p.id === paymentId
+          ? { ...p, status: 'confirmed' as const, providerTransactionId: txnId, confirmedAt: Date.now(), callbackAt: Date.now() }
+          : p,
+      ),
+      bookings: state.bookings.map(b =>
+        b.id === booking.id ? { ...b, status: 'payment_confirmed' as const } : b,
+      ),
+      receipts: [...state.receipts, receipt],
+    });
+    get().logAction('payment.confirm', 'payment', paymentId, { txnId, amount: payment.amountKSh });
+    return receipt;
+  },
+
+  failPayment: (paymentId, reason) => {
+    const state = get();
+    set({
+      payments: state.payments.map(p =>
+        p.id === paymentId ? { ...p, status: 'failed' as const, failedReason: reason } : p,
+      ),
+      bookings: state.bookings.map(b => {
+        const payment = state.payments.find(p => p.id === paymentId);
+        if (payment && b.id === payment.bookingId) {
+          return { ...b, status: 'payment_failed' as const };
+        }
+        return b;
+      }),
+    });
+    get().logAction('payment.fail', 'payment', paymentId, { reason });
+  },
+
+  getPaymentForBooking: (bookingId) => {
+    return get().payments.find(p => p.bookingId === bookingId);
+  },
+
+  getReceiptForBooking: (bookingId) => {
+    return get().receipts.find(r => r.bookingId === bookingId);
+  },
+
+  // ━━ Rating actions ━━
+  submitRating: (bookingId, stars, comment) => {
+    const state = get();
+    const booking = state.bookings.find(b => b.id === bookingId);
+    if (!booking || !booking.cabId) return;
+    const cab = state.cabs.find(c => c.id === booking.cabId);
+    if (!cab) return;
+
+    const rating: Rating = {
+      id: `rating-${Date.now()}`,
+      bookingId,
+      cabId: booking.cabId,
+      passengerName: booking.passengerName,
+      driverName: cab.driverName,
+      stars: Math.max(1, Math.min(5, stars)),
+      comment: comment ? sanitizeInput(comment) : undefined,
+      createdAt: Date.now(),
+    };
+
+    set({ ratings: [...state.ratings, rating] });
+    get().logAction('rating.submit', 'rating', rating.id, { stars, driverName: cab.driverName });
+  },
+
+  getRatingForBooking: (bookingId) => {
+    return get().ratings.find(r => r.bookingId === bookingId);
+  },
+
+  assignCabToStage: (cabId, stageId) => {
+    set({
+      cabs: get().cabs.map(c =>
+        c.id === cabId ? { ...c, stageId } : c,
+      ),
+    });
+  },
+
+  autoAssign: (trainId) => {
+    const state = get();
+    const train = TRAINS.find(t => t.id === trainId);
+    if (!train) return { assigned: 0, unassigned: 0, details: ['Train not found'] };
+
+    // Gather unassigned bookings for this train (matching direction)
+    const unassigned = state.bookings.filter(b =>
+      !b.cabId &&
+      b.status !== 'cancelled' &&
+      b.direction === train.direction
+    );
+
+    if (unassigned.length === 0) {
+      return { assigned: 0, unassigned: 0, details: ['No unassigned bookings for this train'] };
+    }
+
+    // Gather available cabs for this train
+    const availableCabs = state.cabs.filter(c =>
+      c.trainId === trainId &&
+      c.status === 'filling' &&
+      !c.charterLocked &&
+      (c.capacity - c.bookedSeats) > 0
+    );
+
+    if (availableCabs.length === 0) {
+      return { assigned: 0, unassigned: unassigned.length, details: ['No available cabs'] };
+    }
+
+    // Sort bookings by seatsRequested DESC (pack big groups first)
+    const sortedBookings = [...unassigned].sort((a, b) => b.seatsReserved - a.seatsReserved);
+
+    // Build a working copy of cab loads
+    const cabLoads = new Map<string, number>();
+    availableCabs.forEach(c => cabLoads.set(c.id, c.bookedSeats));
+
+    // Track assignment count per driver for fairness (recency penalty)
+    const driverAssignmentCount = new Map<string, number>();
+    availableCabs.forEach(c => driverAssignmentCount.set(c.driverName, 0));
+
+    const details: string[] = [];
+    let assignedCount = 0;
+    let stillUnassigned = 0;
+
+    // Update bookings and cabs
+    const newBookings = [...state.bookings];
+    const newCabs = [...state.cabs];
+    const now = Date.now();
+
+    for (const booking of sortedBookings) {
+      // Compute fairness score for each cab and sort
+      const scoredCabs = availableCabs
+        .map(cab => {
+          const currentLoad = cabLoads.get(cab.id) ?? cab.bookedSeats;
+          const remaining = cab.capacity - currentLoad;
+          const recentAssignments = driverAssignmentCount.get(cab.driverName) ?? 0;
+          // Fairness score: lower = assign first
+          // - currentLoad: emptier cabs first (load balancing)
+          // - recentAssignments * 2: recency penalty
+          // - rating * 0.5: small rating bonus (negative = preferred)
+          const score = currentLoad + (recentAssignments * 2) - (cab.driverRating * 0.5);
+          return { cab, remaining, score };
+        })
+        .filter(s => s.remaining >= booking.seatsReserved)
+        .sort((a, b) => a.score - b.score);
+
+      if (scoredCabs.length === 0) {
+        // No cab can fit this booking
+        stillUnassigned++;
+        details.push(`⚠ ${booking.passengerName} (${booking.seatsReserved} seats) — no cab with enough capacity`);
+        continue;
+      }
+
+      const chosen = scoredCabs[0];
+      const cab = chosen.cab;
+
+      // Update booking
+      const bookingIdx = newBookings.findIndex(b => b.id === booking.id);
+      if (bookingIdx >= 0) {
+        newBookings[bookingIdx] = {
+          ...newBookings[bookingIdx],
+          cabId: cab.id,
+          assignedAt: now,
+        };
+      }
+
+      // Update cab load
+      const newLoad = (cabLoads.get(cab.id) ?? cab.bookedSeats) + booking.seatsReserved;
+      cabLoads.set(cab.id, newLoad);
+
+      // Update driver recency
+      driverAssignmentCount.set(cab.driverName, (driverAssignmentCount.get(cab.driverName) ?? 0) + 1);
+
+      // Update cab in newCabs
+      const cabIdx = newCabs.findIndex(c => c.id === cab.id);
+      if (cabIdx >= 0) {
+        newCabs[cabIdx] = { ...newCabs[cabIdx], bookedSeats: newLoad };
+      }
+
+      assignedCount++;
+      details.push(`✓ ${booking.passengerName} (${booking.seatsReserved} seat${booking.seatsReserved > 1 ? 's' : ''}) → ${cab.driverName}'s ${cab.cabType} [${cab.plateNumber}]`);
+    }
+
+    set({ bookings: newBookings, cabs: newCabs });
+
+    // Audit log
+    if (assignedCount > 0) {
+      get().logAction('admin.autoassign', 'train', trainId, { assigned: assignedCount, unassigned: stillUnassigned });
+    }
+
+    return { assigned: assignedCount, unassigned: stillUnassigned, details };
+  },
+
+  getCab: (id) => get().cabs.find(c => c.id === id),
+  getStage: (id) => STAGES.find(s => s.id === id),
+  getTrain: (id) => TRAINS.find(t => t.id === id),
+  getCabsForTrain: (trainId) => get().cabs.filter(c => c.trainId === trainId && c.direction === 'inbound'),
+  getCabsForStage: (stageId, direction) =>
+    get().cabs.filter(c => c.stageId === stageId && c.direction === direction),
+  getBookingsForCab: (cabId) => get().bookings.filter(b => b.cabId === cabId && b.status !== 'cancelled'),
+  getRequestsForDriver: (cabId) => {
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return [];
+    if (cab.charterLocked) return []; // pooled requests hidden when charter locked
+    return get().requests.filter(r =>
+      r.status === 'pending' &&
+      r.kind === 'pooled' &&
+      r.direction === cab.direction,
+    );
+  },
+  getCharterRequestsForDriver: (cabId) => {
+    const cab = get().cabs.find(c => c.id === cabId);
+    if (!cab) return [];
+    if (cab.charterLocked) return [];
+    const check = canDriverAcceptCharter(cab, get().bookings);
+    if (!check.allowed) return [];
+    return get().requests.filter(r =>
+      r.status === 'pending' &&
+      r.kind === 'charter' &&
+      r.direction === cab.direction,
+    );
+  },
+  getPassengersWaitingAtStage: (stageId) => {
+    // Passengers with pending requests at this stage
+    const reqCount = get().requests
+      .filter(r => r.status === 'pending' && r.stageId === stageId)
+      .reduce((sum, r) => sum + r.seatsRequested, 0);
+    return reqCount;
+  },
+}));

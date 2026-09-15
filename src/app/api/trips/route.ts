@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
     include: {
       route: { include: { stages: { orderBy: { order: "asc" } } } },
       driver: true,
+      train: true,
       bookings: { where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } }, select: { seats: true } },
     },
   });
@@ -40,6 +41,17 @@ export async function GET(req: NextRequest) {
         fare: s.fare,
         homeSurcharge: s.homeSurcharge,
       }));
+      const nonTerminusStages = stages.filter((s) => s.order > 0);
+      const isFromTerminus = t.direction === "FROM_TERMINUS";
+      const train = t.train
+        ? {
+            name: t.train.name,
+            // MTM event time: the departure we race for, or the arrival we meet
+            mtmTime: t.train.direction === "MBA_TO_NBO" ? t.train.originTime : t.train.destTime,
+            ntmTime: t.train.direction === "MBA_TO_NBO" ? t.train.destTime : t.train.originTime,
+            eventKind: t.train.direction === "MBA_TO_NBO" ? "departs_mtm" : "arrives_mtm",
+          }
+        : null;
       return {
         id: t.id,
         routeId: t.route.id,
@@ -48,6 +60,12 @@ export async function GET(req: NextRequest) {
         charterPrice: t.route.charterPrice,
         direction: t.direction,
         departureAt: t.departureAt,
+        // TO_TERMINUS: when the cab reaches the terminus (before the train leaves).
+        // FROM_TERMINUS: departureAt itself is the terminus departure.
+        terminusAt: isFromTerminus
+          ? t.departureAt
+          : new Date(t.departureAt.getTime() + t.route.durationMinutes * 60 * 1000),
+        train,
         status: t.status,
         capacity: t.capacity,
         seatsLeft,
@@ -55,7 +73,10 @@ export async function GET(req: NextRequest) {
         lockNote: t.status === "locked" ? "Bookings locked — late cancellation converts fare to credit" : null,
         driver: t.driver ? { name: t.driver.name, plate: t.driver.plate, cabType: t.driver.cabType, rating: t.driver.rating } : null,
         stages,
-        minFare: Math.min(...stages.map((s) => s.fare)),
+        // FROM_TERMINUS exposes drop-off points; TO_TERMINUS exposes pickup points
+        pointsLabel: isFromTerminus ? "drop-off" : "pickup",
+        points: nonTerminusStages,
+        minFare: Math.min(...nonTerminusStages.map((s) => s.fare)),
       };
     }),
   });

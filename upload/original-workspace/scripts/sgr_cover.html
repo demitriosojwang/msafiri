@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SGR Feeder Platform — Architecture &amp; Data Model Specification</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --c-bg: #faf9f6;
+    --c-primary: #63593b;
+    --c-accent: #907422;
+    --c-text: #1b1a18;
+    --c-muted: #78756f;
+    --c-border: #d3cdb8;
+    --c-grid: rgba(99, 89, 59, 0.05);
+    --c-line: #63593b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--c-bg);
+    width: 794px;
+    height: 1123px;
+    font-family: 'Inter', sans-serif;
+    color: var(--c-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  @page { size: 794px 1123px; margin: 0; }
+
+  @media screen {
+    html { height: auto; display: flex; justify-content: center; }
+    body { transform-origin: top center; scale: min(1, calc(100vh / 1123)); margin: 0 auto; }
+  }
+
+  .cover-page {
+    position: relative;
+    width: 794px;
+    height: 1123px;
+    background: var(--c-bg);
+    overflow: hidden;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Layer 1: Background — subtle grid */
+  .layer-bg {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 1;
+    background-image:
+      linear-gradient(to right, var(--c-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--c-grid) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+
+  /* Layer 2: Structure — left anchor line */
+  .layer-structure {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+  }
+  .anchor-line {
+    position: absolute;
+    left: 95px;            /* 0.12 * 794 */
+    top: 112px;            /* 0.10 * 1123 */
+    width: 6px;
+    height: 899px;         /* 0.80 * 1123 */
+    background: var(--c-line);
+  }
+  .corner-mark {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+  }
+  .corner-mark-tr {
+    top: 96px;
+    right: 96px;
+    border-top: 2px solid var(--c-line);
+    border-right: 2px solid var(--c-line);
+  }
+  .corner-mark-br {
+    bottom: 96px;
+    right: 96px;
+    border-bottom: 2px solid var(--c-line);
+    border-right: 2px solid var(--c-line);
+  }
+  .corner-mark-bl {
+    bottom: 96px;
+    left: 96px;
+    border-bottom: 2px solid var(--c-line);
+    border-left: 2px solid var(--c-line);
+  }
+
+  /* Layer 3: Content */
+  .layer-content {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+  }
+
+  /* Content left edge: 95 (anchor) + 6 (line width) + 44 (gap >= 40) = 145 */
+  --content-left: 145px;
+
+  /* ID badge top-right */
+  .id-badge {
+    position: absolute;
+    top: 56px;
+    right: 145px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--c-muted);
+    letter-spacing: 1px;
+    text-align: right;
+    line-height: 1.4;
+  }
+  .id-badge .v {
+    color: var(--c-accent);
+    font-weight: 600;
+  }
+
+  /* Kicker — Y = 175 */
+  .kicker {
+    position: absolute;
+    top: 175px;
+    left: 145px;
+    right: 80px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    opacity: 0.85;
+  }
+  .kicker .pipe {
+    color: var(--c-accent);
+    margin: 0 10px;
+  }
+
+  /* Hero — Y = 280 (max 2 lines, ends ~400) */
+  .hero {
+    position: absolute;
+    top: 280px;
+    left: 145px;
+    right: 80px;
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+    color: var(--c-text);
+  }
+  .hero .accent {
+    color: var(--c-primary);
+  }
+
+  /* Summary — Y = 580 (well below hero end ~400, gap ~180) */
+  .summary {
+    position: absolute;
+    top: 580px;
+    left: 145px;
+    width: 460px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.65;
+    color: var(--c-text);
+    opacity: 0.88;
+  }
+  .summary p { margin-bottom: 10px; }
+  .summary .em {
+    color: var(--c-primary);
+    font-weight: 600;
+  }
+
+  /* Meta block — Y = 850 */
+  .meta-block {
+    position: absolute;
+    top: 850px;
+    left: 145px;
+    right: 80px;
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 6px 24px;
+    align-items: baseline;
+  }
+  .meta-block .label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+    color: var(--c-muted);
+    font-weight: 500;
+  }
+  .meta-block .value {
+    font-size: 13px;
+    color: var(--c-text);
+    font-weight: 500;
+  }
+
+  /* Footer */
+  .footer {
+    position: absolute;
+    bottom: 56px;
+    left: 145px;
+    right: 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--c-muted);
+    opacity: 0.7;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+<div class="cover-page">
+
+  <div class="layer-bg"></div>
+
+  <div class="layer-structure">
+    <div class="anchor-line"></div>
+    <div class="corner-mark corner-mark-tr"></div>
+    <div class="corner-mark corner-mark-br"></div>
+    <div class="corner-mark corner-mark-bl"></div>
+  </div>
+
+  <div class="layer-content">
+
+    <div class="id-badge">
+      <div>SGRF-ARCH</div>
+      <div class="v">v1.0</div>
+    </div>
+
+    <div class="kicker">
+      Architecture &amp; Data Model Specification
+      <span class="pipe">/</span>
+      Engineering Reference
+    </div>
+
+    <div class="hero">
+      <div class="line1">SGR Feeder</div>
+      <div class="line2 accent">Platform</div>
+    </div>
+
+    <div class="summary">
+      <p>A multi-user transport coordination system connecting passengers arriving at or departing from the Mombasa SGR Terminus with shared and private cab services along the <span class="em">North Coast</span> and <span class="em">South Coast</span> corridors.</p>
+      <p>This document defines the production architecture, domain model, database schema, booking state machine, M-Pesa payment flows, location tracking strategy, and security model.</p>
+    </div>
+
+    <div class="meta-block">
+      <div class="label">Version</div>
+      <div class="value">1.0</div>
+      <div class="label">Date</div>
+      <div class="value">August 2026</div>
+      <div class="label">Audience</div>
+      <div class="value">Engineering Team</div>
+      <div class="label">Status</div>
+      <div class="value">Approved for Implementation</div>
+    </div>
+
+    <div class="footer">
+      <span>SGR Feeder Engineering</span>
+      <span>Mombasa · Kenya</span>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

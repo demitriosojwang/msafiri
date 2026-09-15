@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
     include: {
       route: true,
       driver: true,
+      train: true,
       bookings: {
         include: { passenger: true, ledgerEntry: true },
         orderBy: { createdAt: "asc" },
@@ -50,6 +51,14 @@ export async function GET(req: NextRequest) {
       departedAt: t.departedAt,
       completedAt: t.completedAt,
       source: t.source,
+      train: t.train
+        ? {
+            name: t.train.name,
+            mtmTime: t.train.direction === "MBA_TO_NBO" ? t.train.originTime : t.train.destTime,
+            ntmTime: t.train.direction === "MBA_TO_NBO" ? t.train.destTime : t.train.originTime,
+            eventKind: t.train.direction === "MBA_TO_NBO" ? "departs_mtm" : "arrives_mtm",
+          }
+        : null,
       driver: t.driver
         ? { id: t.driver.id, name: t.driver.name, plate: t.driver.plate, phone: t.driver.phone, mpesaNumber: t.driver.mpesaNumber }
         : null,

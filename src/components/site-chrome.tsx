@@ -92,7 +92,8 @@ export function SiteFooter() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p>
             <span className="font-semibold text-foreground">Mi-Reli</span> — reliable feeder rides
-            connecting the SGR Miritini Terminus with Mombasa.
+            connecting Mombasa Terminus (MTM) with the North &amp; South Coast, timed to every
+            Madaraka Express.
           </p>
           <p className="text-xs">
             Fares collected via M-Pesa · Every shilling tracked in the platform ledger

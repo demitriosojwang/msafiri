@@ -31,6 +31,8 @@ interface ConfigData {
     sweepPendingMinutes: number;
     tripHorizonDays: number;
     bookingWindowMinutes: number;
+    terminusArrivalBufferMinutes: number;
+    trainMeetBufferMinutes: number;
     adminEmails: string[];
     admin2faCode: string;
   };
@@ -83,7 +85,7 @@ export default function AdminConfig() {
           <CardHeader>
             <CardTitle className="text-base">Commission & refunds</CardTitle>
             <CardDescription>
-              The commission rate must stay under the NTSA {(data?.ntsaCap * 100).toFixed(0)}% cap —
+              The commission rate must stay under the NTSA {((data?.ntsaCap ?? 0) * 100).toFixed(0)}% cap —
               the API rejects anything higher.
             </CardDescription>
           </CardHeader>
@@ -193,6 +195,26 @@ export default function AdminConfig() {
             <div className="space-y-1.5">
               <Label htmlFor="c-window">Booking window (min before departure)</Label>
               <Input id="c-window" inputMode="numeric" value={form.bookingWindowMinutes} onChange={(e) => setForm({ ...form, bookingWindowMinutes: num(e.target.value) })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="c-arr-buffer">Terminus arrival buffer (min before train)</Label>
+              <Input
+                id="c-arr-buffer"
+                inputMode="numeric"
+                value={form.terminusArrivalBufferMinutes}
+                onChange={(e) => setForm({ ...form, terminusArrivalBufferMinutes: num(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">TO_TERMINUS cabs reach MTM this early before the train departs.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="c-meet-buffer">Train meet buffer (min after arrival)</Label>
+              <Input
+                id="c-meet-buffer"
+                inputMode="numeric"
+                value={form.trainMeetBufferMinutes}
+                onChange={(e) => setForm({ ...form, trainMeetBufferMinutes: num(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">Return cabs leave MTM this long after the train arrives.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="c-2fa">Admin access code (2nd factor)</Label>

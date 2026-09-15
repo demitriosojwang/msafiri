@@ -1,0 +1,225 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.875rem;
+  /* msafiri — Kenya coast palette
+     Navy = Indian Ocean depth, trust, infrastructure
+     Orange = sunset over Mombasa, warmth, energy, movement
+     Cream = sand, soft backdrop that lets the brand colors pop */
+  --background: oklch(0.98 0.008 75);       /* warm cream (sand) */
+  --foreground: oklch(0.18 0.04 260);        /* deep navy text */
+  --card: oklch(1 0.004 250);                /* pure white card */
+  --card-foreground: oklch(0.18 0.04 260);
+  --popover: oklch(1 0.004 250);
+  --popover-foreground: oklch(0.18 0.04 260);
+  /* Navy — rich, deep, slightly cooler than before */
+  --primary: oklch(0.28 0.07 258);
+  --primary-foreground: oklch(0.99 0.005 75);
+  /* Soft navy-tinted cream for secondary surfaces */
+  --secondary: oklch(0.94 0.018 75);
+  --secondary-foreground: oklch(0.28 0.07 258);
+  --muted: oklch(0.95 0.015 75);
+  --muted-foreground: oklch(0.48 0.025 258);
+  /* Sunset orange — vibrant but not neon */
+  --accent: oklch(0.67 0.19 42);
+  --accent-foreground: oklch(0.99 0.005 75);
+  --destructive: oklch(0.56 0.24 27);
+  --border: oklch(0.90 0.015 75);
+  --input: oklch(0.93 0.012 75);
+  --ring: oklch(0.67 0.19 42);
+  /* Status / chart colors — all harmonized with navy+orange base */
+  --chart-1: oklch(0.28 0.07 258);   /* navy */
+  --chart-2: oklch(0.67 0.19 42);    /* sunset orange */
+  --chart-3: oklch(0.60 0.13 165);   /* coastal palm green */
+  --chart-4: oklch(0.52 0.16 285);   /* twilight purple */
+  --chart-5: oklch(0.62 0.12 195);   /* ocean teal */
+  --sidebar: oklch(0.97 0.008 75);
+  --sidebar-foreground: oklch(0.18 0.04 260);
+  --sidebar-primary: oklch(0.28 0.07 258);
+  --sidebar-primary-foreground: oklch(0.99 0.005 75);
+  --sidebar-accent: oklch(0.94 0.018 75);
+  --sidebar-accent-foreground: oklch(0.28 0.07 258);
+  --sidebar-border: oklch(0.90 0.015 75);
+  --sidebar-ring: oklch(0.67 0.19 42);
+}
+
+.dark {
+  --background: oklch(0.15 0.025 258);
+  --foreground: oklch(0.97 0.008 75);
+  --card: oklch(0.20 0.03 258);
+  --card-foreground: oklch(0.97 0.008 75);
+  --popover: oklch(0.20 0.03 258);
+  --popover-foreground: oklch(0.97 0.008 75);
+  --primary: oklch(0.67 0.19 42);
+  --primary-foreground: oklch(0.15 0.025 258);
+  --secondary: oklch(0.27 0.035 258);
+  --secondary-foreground: oklch(0.97 0.008 75);
+  --muted: oklch(0.27 0.035 258);
+  --muted-foreground: oklch(0.72 0.018 75);
+  --accent: oklch(0.67 0.19 42);
+  --accent-foreground: oklch(0.15 0.025 258);
+  --destructive: oklch(0.65 0.22 25);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.67 0.19 42);
+  --chart-1: oklch(0.67 0.19 42);
+  --chart-2: oklch(0.60 0.13 165);
+  --chart-3: oklch(0.72 0.14 75);
+  --chart-4: oklch(0.65 0.18 285);
+  --chart-5: oklch(0.65 0.12 195);
+  --sidebar: oklch(0.20 0.03 258);
+  --sidebar-foreground: oklch(0.97 0.008 75);
+  --sidebar-primary: oklch(0.67 0.19 42);
+  --sidebar-primary-foreground: oklch(0.15 0.025 258);
+  --sidebar-accent: oklch(0.32 0.035 258);
+  --sidebar-accent-foreground: oklch(0.97 0.008 75);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.67 0.19 42);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Subtle warm gradient backdrop — like a soft coastal sky */
+    background-image:
+      radial-gradient(ellipse at top, oklch(0.96 0.025 75 / 0.6), transparent 60%),
+      radial-gradient(ellipse at bottom, oklch(0.95 0.02 258 / 0.3), transparent 50%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  /* Card with soft shadow + subtle border — feels lifted but not heavy */
+  .msafiri-card {
+    @apply bg-card border border-border rounded-xl;
+    box-shadow:
+      0 1px 2px oklch(0.18 0.04 258 / 0.04),
+      0 4px 12px oklch(0.18 0.04 258 / 0.06);
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+  }
+  .msafiri-card:hover {
+    box-shadow:
+      0 2px 4px oklch(0.18 0.04 258 / 0.06),
+      0 8px 20px oklch(0.18 0.04 258 / 0.10);
+  }
+  .msafiri-card-tap:active {
+    transform: scale(0.985);
+  }
+
+  /* Gradient accent bar — used at top of primary cards */
+  .msafiri-accent-bar {
+    background: linear-gradient(
+      90deg,
+      oklch(0.28 0.07 258) 0%,
+      oklch(0.40 0.10 258) 50%,
+      oklch(0.67 0.19 42) 100%
+    );
+  }
+
+  /* Pills (train selector, date picker) */
+  .msafiri-pill {
+    @apply rounded-xl border transition-all duration-200;
+  }
+  .msafiri-pill-active {
+    background: linear-gradient(135deg, oklch(0.28 0.07 258), oklch(0.35 0.09 260));
+    color: oklch(0.99 0.005 75);
+    border-color: oklch(0.28 0.07 258);
+    box-shadow: 0 4px 12px oklch(0.28 0.07 258 / 0.25);
+  }
+
+  /* Soft pulse for live indicators */
+  @keyframes msafiri-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .msafiri-live-dot {
+    animation: msafiri-pulse 2s ease-in-out infinite;
+  }
+
+  /* Splash screen animations */
+  @keyframes msafiri-splash-in {
+    0% { opacity: 0; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.02); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes msafiri-splash-out {
+    0% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+  @keyframes msafiri-fade-up {
+    0% { opacity: 0; transform: translateY(12px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes msafiri-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .msafiri-splash-in {
+    animation: msafiri-splash-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .msafiri-splash-out {
+    animation: msafiri-splash-out 0.4s ease-in forwards;
+  }
+  .msafiri-fade-up {
+    animation: msafiri-fade-up 0.5s ease-out both;
+  }
+
+  /* Shimmer loading bar */
+  .msafiri-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(0.67 0.19 42 / 0.4) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: msafiri-shimmer 1.5s linear infinite;
+  }
+}

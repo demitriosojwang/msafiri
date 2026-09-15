@@ -1,10 +1,14 @@
 /**
  * Mi-Reli seed — Mombasa SGR feeder network.
  *
- * Creates: config, routes+stages, drivers, the trip schedule horizon,
- * and a small historical money story so every ledger bucket is represented:
+ * Creates: config, the Madaraka Express timetable (MTM/NTM times), the North
+ * & South Coast stage networks with their fares, drivers, and a small
+ * historical money story so every ledger bucket is represented:
  *   held / driver_payable / commission_taken / refunded /
  *   converted_to_credit / forfeited — plus completed, failed and queued payouts.
+ *
+ * Forward trips are NOT seeded — `ensureTrips()` generates them train-synced
+ * on first request.
  *
  * Run: bun scripts/seed.ts
  */
@@ -44,6 +48,7 @@ async function main() {
   await db.trip.deleteMany();
   await db.routeStage.deleteMany();
   await db.route.deleteMany();
+  await db.train.deleteMany();
   await db.driver.deleteMany();
   await db.passenger.deleteMany();
   await db.platformConfig.deleteMany();
@@ -67,20 +72,53 @@ async function main() {
     },
   });
 
-  // ── Routes & stages ────────────────────────────────────────────────────────
+  // ── Madaraka Express timetable (MTM/NTM per official schedule) ────────────
+  // From Nairobi to Mombasa — arrivals at MTM
+  //   Inter-County NTM 08:00 → MTM 14:00 · Express NTM 15:00 → MTM 20:30
+  //   Night Train NTM 22:00 → MTM 03:55 (+1 day)
+  // From Mombasa to Nairobi — departures from MTM
+  //   Inter-County MTM 08:00 → NTM 14:10 · Express MTM 15:00 → NTM 20:18
+  //   Night Train MTM 22:00 → NTM 03:55 (+1 day)
+  const trains = await Promise.all(
+    [
+      { name: "Inter-County", direction: "MBA_TO_NBO", originCode: "MTM", destCode: "NTM", originTime: "08:00", destTime: "14:10", destDayOffset: 0 },
+      { name: "Express", direction: "MBA_TO_NBO", originCode: "MTM", destCode: "NTM", originTime: "15:00", destTime: "20:18", destDayOffset: 0 },
+      { name: "Night Train", direction: "MBA_TO_NBO", originCode: "MTM", destCode: "NTM", originTime: "22:00", destTime: "03:55", destDayOffset: 1 },
+      { name: "Inter-County", direction: "NBO_TO_MBA", originCode: "NTM", destCode: "MTM", originTime: "08:00", destTime: "14:00", destDayOffset: 0 },
+      { name: "Express", direction: "NBO_TO_MBA", originCode: "NTM", destCode: "MTM", originTime: "15:00", destTime: "20:30", destDayOffset: 0 },
+      { name: "Night Train", direction: "NBO_TO_MBA", originCode: "NTM", destCode: "MTM", originTime: "22:00", destTime: "03:55", destDayOffset: 1 },
+    ].map((t) => db.train.create({ data: t }))
+  );
+  const meetTrain = (name: string, direction: string) =>
+    trains.find((t) => t.name === name && t.direction === direction)!;
+
+  // ── Routes & stages (station prices as supplied) ───────────────────────────
   const route1 = await db.route.create({
     data: {
-      name: "Miritini ↔ Likoni Ferry",
-      durationMinutes: 75,
-      charterPrice: 3200,
+      name: "Mombasa Terminus ↔ North Coast (Mtwapa · Malindi)",
+      durationMinutes: 90,
+      charterPrice: 3800,
       stages: {
         create: [
-          { name: "Miritini Terminus", order: 0, lat: -4.022, lng: 39.642, fare: 150, homeSurcharge: 40 },
-          { name: "Kipevu Link", order: 1, lat: -4.032, lng: 39.638, fare: 210, homeSurcharge: 48 },
-          { name: "Jomvu", order: 2, lat: -4.04, lng: 39.65, fare: 270, homeSurcharge: 56 },
-          { name: "Magongo", order: 3, lat: -4.05, lng: 39.662, fare: 330, homeSurcharge: 64 },
-          { name: "Port Reitz", order: 4, lat: -4.058, lng: 39.67, fare: 390, homeSurcharge: 72 },
-          { name: "Likoni Ferry", order: 5, lat: -4.068, lng: 39.67, fare: 450, homeSurcharge: 80 },
+          { name: "Mombasa Terminus (MTM)", order: 0, lat: -4.0476, lng: 39.6451, fare: 0, homeSurcharge: 0 },
+          { name: "Kiembeni Mwisho", order: 1, lat: -3.9652, lng: 39.7062, fare: 400, homeSurcharge: 60 },
+          { name: "Kiembeni Police", order: 2, lat: -3.9668, lng: 39.7091, fare: 400, homeSurcharge: 60 },
+          { name: "Ananda Marga", order: 3, lat: -3.9701, lng: 39.7124, fare: 400, homeSurcharge: 60 },
+          { name: "San Sera", order: 4, lat: -3.9732, lng: 39.7153, fare: 400, homeSurcharge: 60 },
+          { name: "Green Estate", order: 5, lat: -3.9756, lng: 39.7178, fare: 400, homeSurcharge: 60 },
+          { name: "Kona Kiembeni", order: 6, lat: -3.9779, lng: 39.7201, fare: 400, homeSurcharge: 60 },
+          { name: "Bamburi Mwisho", order: 7, lat: -3.9761, lng: 39.7353, fare: 400, homeSurcharge: 60 },
+          { name: "Naivas Bamburi", order: 8, lat: -3.9868, lng: 39.7261, fare: 400, homeSurcharge: 60 },
+          { name: "Total Bamburi", order: 9, lat: -3.9841, lng: 39.7292, fare: 400, homeSurcharge: 60 },
+          { name: "Fisheries", order: 10, lat: -3.9462, lng: 39.7481, fare: 400, homeSurcharge: 60 },
+          { name: "Mwembeni", order: 11, lat: -3.9438, lng: 39.7434, fare: 400, homeSurcharge: 60 },
+          { name: "JCC Junction", order: 12, lat: -3.9689, lng: 39.7372, fare: 400, homeSurcharge: 60 },
+          { name: "Nyali Center", order: 13, lat: -4.0421, lng: 39.7263, fare: 400, homeSurcharge: 60 },
+          { name: "VOK", order: 14, lat: -4.0391, lng: 39.7183, fare: 400, homeSurcharge: 60 },
+          { name: "Bombolulu", order: 15, lat: -4.0053, lng: 39.7081, fare: 400, homeSurcharge: 60 },
+          { name: "Lights", order: 16, lat: -3.9992, lng: 39.7132, fare: 400, homeSurcharge: 60 },
+          { name: "Mtwapa", order: 17, lat: -3.9483, lng: 39.7456, fare: 400, homeSurcharge: 60 },
+          { name: "Malindi", order: 18, lat: -3.2219, lng: 40.1169, fare: 700, homeSurcharge: 150 },
         ],
       },
     },
@@ -88,33 +126,16 @@ async function main() {
 
   const route2 = await db.route.create({
     data: {
-      name: "Miritini ↔ Mombasa CBD",
-      durationMinutes: 60,
-      charterPrice: 3000,
+      name: "Mombasa Terminus ↔ South Coast (Likoni · Diani)",
+      durationMinutes: 120,
+      charterPrice: 3200,
       stages: {
         create: [
-          { name: "Miritini Terminus", order: 0, lat: -4.022, lng: 39.642, fare: 120, homeSurcharge: 40 },
-          { name: "Jomvu", order: 1, lat: -4.04, lng: 39.65, fare: 180, homeSurcharge: 48 },
-          { name: "Changamwe", order: 2, lat: -4.045, lng: 39.632, fare: 240, homeSurcharge: 56 },
-          { name: "Moi Airport", order: 3, lat: -4.034, lng: 39.594, fare: 300, homeSurcharge: 64 },
-          { name: "Mombasa CBD (GPO)", order: 4, lat: -4.054, lng: 39.667, fare: 360, homeSurcharge: 72 },
-        ],
-      },
-    },
-  });
-
-  const route3 = await db.route.create({
-    data: {
-      name: "Miritini ↔ Mtwapa",
-      durationMinutes: 90,
-      charterPrice: 4200,
-      stages: {
-        create: [
-          { name: "Miritini Terminus", order: 0, lat: -4.022, lng: 39.642, fare: 180, homeSurcharge: 50 },
-          { name: "Kisauni", order: 1, lat: -4.006, lng: 39.68, fare: 260, homeSurcharge: 58 },
-          { name: "Bamburi", order: 2, lat: -3.996, lng: 39.7, fare: 340, homeSurcharge: 66 },
-          { name: "Nyali", order: 3, lat: -4.0, lng: 39.72, fare: 420, homeSurcharge: 74 },
-          { name: "Mtwapa", order: 4, lat: -3.95, lng: 39.745, fare: 520, homeSurcharge: 90 },
+          { name: "Mombasa Terminus (MTM)", order: 0, lat: -4.0476, lng: 39.6451, fare: 0, homeSurcharge: 0 },
+          { name: "Likoni Ferry Container", order: 1, lat: -4.0661, lng: 39.6682, fare: 400, homeSurcharge: 60 },
+          { name: "Kona Mpya (Fayaz)", order: 2, lat: -4.0883, lng: 39.6032, fare: 400, homeSurcharge: 60 },
+          { name: "ShikaAdabu Checkpoint", order: 3, lat: -4.1121, lng: 39.5923, fare: 400, homeSurcharge: 60 },
+          { name: "Diani Naivas", order: 4, lat: -4.2802, lng: 39.5918, fare: 500, homeSurcharge: 100 },
         ],
       },
     },
@@ -146,35 +167,11 @@ async function main() {
     )
   );
 
-  // ── Trip schedule horizon ──────────────────────────────────────────────────
-  const SCHEDULE_HOURS = [6, 9, 12, 15, 18, 20];
-  const routes = [route1, route2, route3];
-  let rr = 0;
-  for (let dayOffset = -1; dayOffset <= 2; dayOffset++) {
-    for (const route of routes) {
-      for (const direction of ["FROM_TERMINUS", "TO_TERMINUS"]) {
-        for (const h of SCHEDULE_HOURS) {
-          const dep = at(now, dayOffset, h);
-          if (dayOffset < 0 && dep.getTime() > now.getTime() - 6 * H) continue;
-          if (dayOffset >= 0 && dep.getTime() < now.getTime() - 30 * 60 * 1000) continue;
-          const driver = drivers[rr++ % drivers.length];
-          await db.trip.create({
-            data: {
-              routeId: route.id,
-              driverId: driver.id,
-              direction,
-              departureAt: dep,
-              capacity: driver.capacity,
-              status: dayOffset < 0 ? "completed" : "scheduled",
-              source: "schedule",
-            },
-          });
-        }
-      }
-    }
-  }
-
   // ── Historical money story (yesterday) ────────────────────────────────────
+  // Forward schedule is generated train-synced by ensureTrips() on demand.
+  // Yesterday's two completed trips below are anchored to real train arrivals:
+  //   H1 meets the Inter-County arriving MTM 14:00 (shuttle left 14:45)
+  //   H2 meets the Express arriving MTM 20:30 (shuttle left 21:15)
   const passengersData = [
     { name: "Grace Wanjiku", phone: "+254701111111" },
     { name: "John Ochieng", phone: "+254701111112" },
@@ -191,7 +188,8 @@ async function main() {
   }
 
   const commissionRate = 0.15;
-  const yesterdayDep = at(now, -1, 9);
+  const yesterdayDep = at(now, -1, 14); // 14:45 shuttle meeting the 14:00 Inter-County arrival
+  yesterdayDep.setMinutes(45);
   const tripH1 = await db.trip.create({
     data: {
       routeId: route1.id,
@@ -203,16 +201,17 @@ async function main() {
       status: "completed",
       lockedAt: new Date(yesterdayDep.getTime() - 2 * H),
       departedAt: yesterdayDep,
-      completedAt: new Date(yesterdayDep.getTime() + 75 * 60 * 1000),
+      completedAt: new Date(yesterdayDep.getTime() + 90 * 60 * 1000),
       source: "schedule",
+      trainId: meetTrain("Inter-County", "NBO_TO_MBA").id,
     },
   });
 
   const h1Bookings = [
-    { key: "+254701111111", stageIdx: 3, seats: 2, boarded: true, outcome: "completed", payoutStatus: "completed" as const },
-    { key: "+254701111112", stageIdx: 5, seats: 1, boarded: true, outcome: "completed", payoutStatus: "completed" as const },
-    { key: "+254701111117", stageIdx: 1, seats: 1, boarded: false, outcome: "refunded", payoutStatus: null },
-    { key: "+254701111113", stageIdx: 4, seats: 1, boarded: false, outcome: "converted_to_credit", payoutStatus: null },
+    { key: "+254701111111", stageIdx: 3, seats: 2, boarded: true, outcome: "completed", payoutStatus: "completed" as const }, // Ananda Marga ×2
+    { key: "+254701111112", stageIdx: 18, seats: 1, boarded: true, outcome: "completed", payoutStatus: "completed" as const }, // Malindi
+    { key: "+254701111117", stageIdx: 1, seats: 1, boarded: false, outcome: "refunded", payoutStatus: null }, // Kiembeni Mwisho
+    { key: "+254701111113", stageIdx: 4, seats: 1, boarded: false, outcome: "converted_to_credit", payoutStatus: null }, // San Sera
   ];
 
   for (const [i, sb] of h1Bookings.entries()) {
@@ -312,8 +311,9 @@ async function main() {
     }
   }
 
-  // Trip H2 — Mwangi's route: failed payout + forfeited no-show + queued payout
-  const yesterdayDep2 = at(now, -1, 15);
+  // Trip H2 — Daniel's route: failed payout + forfeited no-show + queued payout
+  const yesterdayDep2 = at(now, -1, 21); // 21:15 shuttle meeting the 20:30 Express arrival
+  yesterdayDep2.setMinutes(15);
   const tripH2 = await db.trip.create({
     data: {
       routeId: route2.id,
@@ -325,14 +325,15 @@ async function main() {
       status: "completed",
       lockedAt: new Date(yesterdayDep2.getTime() - 2 * H),
       departedAt: yesterdayDep2,
-      completedAt: new Date(yesterdayDep2.getTime() + 60 * 60 * 1000),
+      completedAt: new Date(yesterdayDep2.getTime() + 120 * 60 * 1000),
       source: "schedule",
+      trainId: meetTrain("Express", "NBO_TO_MBA").id,
     },
   });
   const h2Plan = [
-    { key: "+254701111114", seats: 3, stageIdx: 4, boarded: true, payout: "failed" as const, outcome: "completed" },
-    { key: "+254701111115", seats: 1, stageIdx: 3, boarded: false, payout: null, outcome: "forfeited" },
-    { key: "+254701111116", seats: 1, stageIdx: 1, boarded: true, payout: "queued" as const, outcome: "completed" },
+    { key: "+254701111114", seats: 3, stageIdx: 4, boarded: true, payout: "failed" as const, outcome: "completed" }, // Diani Naivas ×3
+    { key: "+254701111115", seats: 1, stageIdx: 3, boarded: false, payout: null, outcome: "forfeited" }, // ShikaAdabu
+    { key: "+254701111116", seats: 1, stageIdx: 1, boarded: true, payout: "queued" as const, outcome: "completed" }, // Likoni Ferry Container
   ];
   for (const [i, sb] of h2Plan.entries()) {
     const passengerId = passengers[sb.key];
@@ -340,12 +341,14 @@ async function main() {
     const fare = stage.fare * sb.seats;
     const code = `MR-H2${i}${receipt().slice(0, 3)}`;
     const outcome = sb.payout === "failed" ? "completed" : (sb.outcome as string);
+    // Ledger: money only reaches "commission_taken" once the B2C succeeded —
+    // failed and queued payouts leave the fare at "driver_payable".
     const ledgerStatus =
-      outcome === "completed" && sb.payout === "completed"
-        ? "commission_taken"
-        : outcome === "completed"
+      outcome === "completed"
+        ? sb.payout === "queued" || sb.payout === "failed"
           ? "driver_payable"
-          : "forfeited";
+          : "commission_taken"
+        : "forfeited";
     const b = await db.booking.create({
       data: {
         code,

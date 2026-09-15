@@ -33,6 +33,12 @@ interface Stage {
   fare: number;
   homeSurcharge: number;
 }
+export interface TrainInfo {
+  name: string;
+  mtmTime: string;
+  ntmTime: string;
+  eventKind: "departs_mtm" | "arrives_mtm";
+}
 export interface BookableTrip {
   id: string;
   routeId: string;
@@ -41,10 +47,15 @@ export interface BookableTrip {
   charterPrice: number;
   direction: string;
   departureAt: string;
+  terminusAt: string;
+  train: TrainInfo | null;
   status: string;
   capacity: number;
   seatsLeft: number;
+  bookable: boolean;
   stages: Stage[];
+  pointsLabel: "drop-off" | "pickup";
+  minFare: number;
   driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
@@ -89,8 +100,10 @@ export function BookingSheet({
 
   useEffect(() => {
     if (open && trip) {
-      // default: farthest stage (destination) for FROM_TERMINUS, else first stage
-      const def = trip.direction === "FROM_TERMINUS" ? trip.stages[trip.stages.length - 1] : trip.stages[0];
+      // default: farthest point for FROM_TERMINUS (drop-off), first coast
+      // stage for TO_TERMINUS (pickup) — the terminus itself is never a point
+      const usable = trip.stages.filter((s) => s.order > 0);
+      const def = trip.direction === "FROM_TERMINUS" ? usable[usable.length - 1] : usable[0];
       setStageId(def?.id || "");
       setSeats(1);
       setCharter(false);
@@ -152,8 +165,13 @@ export function BookingSheet({
               <DialogHeader>
                 <DialogTitle>Book your ride</DialogTitle>
                 <DialogDescription id="book-desc">
-                  {trip.routeName} · departs {fmtTime(trip.departureAt)} · {trip.seatsLeft} seats left
+                  Departs {fmtTime(trip.departureAt)} · {trip.seatsLeft} seats left
                   {trip.driver ? ` · ${trip.driver.name} (${trip.driver.plate})` : ""}
+                  {trip.train
+                    ? trip.direction === "FROM_TERMINUS"
+                      ? ` · meets the ${trip.train.name} arriving MTM ${trip.train.mtmTime}`
+                      : ` · connects to the ${trip.train.name} departing MTM ${trip.train.mtmTime}`
+                    : ""}
                 </DialogDescription>
               </DialogHeader>
 
@@ -193,15 +211,17 @@ export function BookingSheet({
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1.5">
                     <MapPin className="h-4 w-4 text-primary" />
-                    {trip.direction === "FROM_TERMINUS" ? "Drop-off stage" : "Pickup stage"}
+                    {trip.direction === "FROM_TERMINUS" ? "Drop-off point" : "Pickup point"}
                   </Label>
                   <Select value={stageId} onValueChange={setStageId}>
-                    <SelectTrigger aria-label="Select stage">
-                      <SelectValue placeholder="Choose your stage" />
+                    <SelectTrigger aria-label={trip.direction === "FROM_TERMINUS" ? "Select drop-off point" : "Select pickup point"}>
+                      <SelectValue
+                        placeholder={trip.direction === "FROM_TERMINUS" ? "Choose your drop-off point" : "Choose your pickup point"}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {trip.stages
-                        .filter((s) => s.order > 0 || trip.direction === "TO_TERMINUS")
+                        .filter((s) => s.order > 0)
                         .map((s) => (
                           <SelectItem key={s.id} value={s.id}>
                             {s.name} · {ksh(s.fare)}/seat
@@ -209,6 +229,11 @@ export function BookingSheet({
                         ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {trip.direction === "FROM_TERMINUS"
+                      ? "The cab drops you at any of these points — pick where it's easiest."
+                      : "Shared-ride pickup points along the route — be at your point 10 minutes early."}
+                  </p>
                 </div>
 
                 <div className="rounded-lg border p-3 space-y-3">

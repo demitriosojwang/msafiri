@@ -19,18 +19,28 @@ import {
   CalendarDays,
   Car,
   Clock,
-  Lock,
-  MapPin,
+  MapPinCheck,
   Search,
   ShieldCheck,
   Star,
-  TicketCheck,
+  TrainFront,
 } from "lucide-react";
 
 function todayStr(offset = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
   return d.toISOString().slice(0, 10);
+}
+
+interface TrainSchedule {
+  id: string;
+  name: string;
+  direction: string;
+  originCode: string;
+  destCode: string;
+  originTime: string;
+  destTime: string;
+  destDayOffset: number;
 }
 
 export default function Home() {
@@ -43,6 +53,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<BookableTrip | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [trains, setTrains] = useState<TrainSchedule[]>([]);
+
+  useEffect(() => {
+    api<{ trains: TrainSchedule[] }>("/api/trains")
+      .then((r) => setTrains(r.trains))
+      .catch(() => {});
+  }, []);
 
   const loadTrips = useCallback(async (dir: string, d: string) => {
     setLoading(true);
@@ -84,15 +101,17 @@ export default function Home() {
           <div className="mx-auto max-w-5xl px-4 py-10 sm:py-14">
             <div className="max-w-2xl">
               <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-900">
-                <TicketCheck className="h-3.5 w-3.5" /> SGR feeder service · Mombasa
+                <TrainFront className="h-3.5 w-3.5" /> SGR feeder · timed to every Madaraka Express
               </p>
               <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
                 Off the train, onto a cab that <span className="text-primary">actually shows up.</span>
               </h1>
               <p className="mt-3 text-muted-foreground sm:text-lg">
-                Mi-Reli connects the Miritini Terminus with stages across Mombasa — Likoni, CBD,
-                Mtwapa and more. Book a seat or take the whole cab. Pay with M-Pesa; your fare is
-                held safely until your ride is delivered.
+                Mi-Reli shuttles you between Mombasa Terminus (MTM) and the coast — shared-ride
+                pickup points across the North Coast (Kiembeni, Bamburi, Nyali, Mtwapa, Malindi)
+                and the South Coast (Likoni, ShikaAdabu, Diani). Every cab is timed to a train
+                departure or arrival. Pay with M-Pesa; your fare is held safely until your ride
+                is delivered.
               </p>
             </div>
 
@@ -109,7 +128,7 @@ export default function Home() {
                           direction === "FROM_TERMINUS" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        Terminus → Stage
+                        Train → drop-off
                       </button>
                       <button
                         onClick={() => switchDirection("TO_TERMINUS")}
@@ -117,7 +136,7 @@ export default function Home() {
                           direction === "TO_TERMINUS" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        Stage → Terminus
+                        Pickup → train
                       </button>
                     </div>
                   </div>
@@ -151,7 +170,9 @@ export default function Home() {
             <h2 className="text-lg font-semibold">
               {searched ? "Departures" : "Today's departures"}
               <span className="ml-2 text-sm font-normal text-muted-foreground">
-                {direction === "FROM_TERMINUS" ? "Miritini Terminus → your stage" : "your stage → Miritini Terminus"}
+                {direction === "FROM_TERMINUS"
+                  ? "Mombasa Terminus (MTM) → your drop-off point"
+                  : "your pickup point → Mombasa Terminus (MTM)"}
               </span>
             </h2>
           </div>
@@ -168,8 +189,11 @@ export default function Home() {
             <Card>
               <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
                 <ArrowRightLeft className="h-8 w-8 text-muted-foreground" />
-                <p className="font-medium">No departures left for this day</p>
-                <p className="text-sm text-muted-foreground">Try another date — the schedule runs 06:00 to 18:00.</p>
+                <p className="font-medium">No rides left for this day</p>
+                <p className="text-sm text-muted-foreground">
+                  Try another date — cabs run with every Madaraka Express departure and arrival
+                  at Mombasa Terminus, including the night train.
+                </p>
               </CardContent>
             </Card>
           )}
@@ -185,8 +209,21 @@ export default function Home() {
                           <Clock className="h-4 w-4 text-primary" /> {fmtTime(t.departureAt)}
                         </span>
                         <TripStatusBadge status={t.status} />
+                        {t.train && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+                            <TrainFront className="h-3 w-3" />
+                            {t.direction === "FROM_TERMINUS"
+                              ? `Meets the ${t.train.name} · arrives MTM ${t.train.mtmTime}`
+                              : `Catches the ${t.train.name} · departs MTM ${t.train.mtmTime}`}
+                          </span>
+                        )}
                       </div>
-                      <p className="mt-0.5 truncate text-sm text-muted-foreground">{t.routeName}</p>
+                      <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                        {t.routeName}
+                        {t.direction === "TO_TERMINUS"
+                          ? ` · cab reaches the terminus ${fmtTime(t.terminusAt)}, ahead of the train`
+                          : ` · ${t.stages.filter((s) => s.order > 0).length} drop-off points`}
+                      </p>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                         {t.driver && (
                           <span className="inline-flex items-center gap-1">
@@ -202,7 +239,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end">
                       <div className="text-right">
-                        <p className="text-lg font-bold text-primary">{ksh(Math.min(...t.stages.map((s) => s.fare)))}+</p>
+                        <p className="text-lg font-bold text-primary">{ksh(t.minFare)}+</p>
                         <p className="text-xs text-muted-foreground">per seat · charter {ksh(t.charterPrice)}</p>
                       </div>
                       <Button
@@ -220,6 +257,76 @@ export default function Home() {
             </div>
           )}
         </section>
+
+        {/* Madaraka Express timetable — the trains every cab is timed to */}
+        {trains.length > 0 && (
+          <section className="border-t">
+            <div className="mx-auto max-w-5xl px-4 py-8">
+              <div className="flex items-center gap-2">
+                <TrainFront className="h-5 w-5 text-primary" />
+                <h2 className="text-lg font-semibold">The trains we meet — Madaraka Express</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                MTM = Mombasa Terminus · NTM = Nairobi Terminus. Outbound cabs arrive at MTM
+                before each departure; return cabs leave MTM after each arrival.
+              </p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="mb-2 text-sm font-semibold">Mombasa → Nairobi</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                        <th className="py-1.5 pr-3">Train</th>
+                        <th className="py-1.5 pr-3">Departs MTM</th>
+                        <th className="py-1.5">Arrives NTM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trains
+                        .filter((tr) => tr.direction === "MBA_TO_NBO")
+                        .map((tr) => (
+                          <tr key={tr.id} className="border-b last:border-0">
+                            <td className="py-1.5 pr-3 font-medium">{tr.name}</td>
+                            <td className="py-1.5 pr-3">{tr.originTime}</td>
+                            <td className="py-1.5">
+                              {tr.destTime}
+                              {tr.destDayOffset > 0 ? " (+1 day)" : ""}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="mb-2 text-sm font-semibold">Nairobi → Mombasa</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                        <th className="py-1.5 pr-3">Train</th>
+                        <th className="py-1.5 pr-3">Departs NTM</th>
+                        <th className="py-1.5">Arrives MTM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trains
+                        .filter((tr) => tr.direction === "NBO_TO_MBA")
+                        .map((tr) => (
+                          <tr key={tr.id} className="border-b last:border-0">
+                            <td className="py-1.5 pr-3 font-medium">{tr.name}</td>
+                            <td className="py-1.5 pr-3">{tr.originTime}</td>
+                            <td className="py-1.5">
+                              {tr.destTime}
+                              {tr.destDayOffset > 0 ? " (+1 day)" : ""}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Trust / how money works */}
         <section className="border-t bg-muted/30">
@@ -245,12 +352,13 @@ export default function Home() {
               </div>
             </div>
             <div className="flex gap-3">
-              <MapPin className="h-6 w-6 shrink-0 text-primary" />
+              <MapPinCheck className="h-6 w-6 shrink-0 text-primary" />
               <div>
-                <p className="font-semibold">Stage or doorstep</p>
+                <p className="font-semibold">Pickup &amp; drop-off points</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Meet the cab at any stage along the route, or add door-to-door pickup — the
-                  surcharge goes to the driver in full.
+                  Share the ride from any of 22 coast points — Kiembeni to Mtwapa and Malindi up
+                  north, Likoni to Diani down south. Returning by train? Choose your drop-off
+                  point when you book.
                 </p>
               </div>
             </div>

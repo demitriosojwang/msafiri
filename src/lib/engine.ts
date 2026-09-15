@@ -10,31 +10,62 @@ import { audit } from "@/lib/audit";
  * API reads/writes, so the platform keeps operating even with no traffic.
  */
 
-// Mombasa-area daily schedule slots (hours) for feeder departures
-const SCHEDULE_HOURS = [6, 9, 12, 15, 18, 20];
+// ─── Train-synced scheduling ─────────────────────────────────────────────────
+// Every feeder cab is anchored to a Madaraka Express event at Mombasa
+// Terminus (MTM), per the official timetable (MTM/NTM times):
+//   · Trains DEPARTING MTM (Inter-County 08:00 · Express 15:00 · Night 22:00)
+//     → TO_TERMINUS shuttles pick up along the coast and reach MTM at least
+//       `terminusArrivalBufferMinutes` before departure.
+//   · Trains ARRIVING MTM (Inter-County 14:00 · Express 20:30 · Night 03:55)
+//     → FROM_TERMINUS shuttles leave MTM `trainMeetBufferMinutes` after
+//       arrival, dropping passengers at their chosen drop-off points.
 
-/** Creates scheduled trips for the next `tripHorizonDays` and assigns
- *  available drivers round-robin. Lazily self-extending. */
+function parseHHMM(hhmm: string): { h: number; m: number } {
+  const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
+  return { h: h || 0, m: m || 0 };
+}
+
+function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
+  const { h, m } = parseHHMM(hhmm);
+  const d = new Date(base);
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+/** Creates scheduled trips for the next `tripHorizonDays`, anchored to the
+ *  train timetable, and assigns available drivers. Return shuttles reuse the
+ *  outbound driver of the same route + train when feasible. Lazily
+ *  self-extending; idempotent. */
 export async function ensureTrips(): Promise<number> {
   const cfg = await getConfig();
   const routes = await db.route.findMany({ where: { active: true } });
   const drivers = await db.driver.findMany({ where: { status: "active" }, orderBy: { createdAt: "asc" } });
-  if (!drivers.length) return 0;
+  if (!drivers.length || !routes.length) return 0;
+
+  // Departure-anchored (MBA_TO_NBO) trains first, so outbound cabs exist
+  // before arrival-anchored return cabs try to pair with their drivers.
+  const trains = await db.train.findMany({
+    where: { active: true },
+    orderBy: [{ direction: "asc" }, { originTime: "asc" }],
+  });
+  if (!trains.length) return 0;
 
   const now = new Date();
   let created = 0;
   let rr = (await db.trip.count()) % Math.max(drivers.length, 1); // round-robin offset
 
   for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
-    for (const route of routes) {
-      for (const direction of ["FROM_TERMINUS", "TO_TERMINUS"]) {
-        for (const h of SCHEDULE_HOURS) {
-          const dep = new Date(now);
-          dep.setDate(dep.getDate() + dayOffset);
-          dep.setHours(h, 0, 0, 0);
+    for (const train of trains) {
+      if (train.direction === "MBA_TO_NBO") {
+        // Departure event at MTM → coast pickups must reach the terminus early
+        const trainDep = dayAt(now, dayOffset, train.originTime);
+        const terminusAt = new Date(trainDep.getTime() - cfg.terminusArrivalBufferMinutes * 60 * 1000);
+        for (const route of routes) {
+          const dep = new Date(terminusAt.getTime() - route.durationMinutes * 60 * 1000);
           if (dep.getTime() < now.getTime() - 30 * 60 * 1000) continue; // skip stale slots
           const exists = await db.trip.findFirst({
-            where: { routeId: route.id, direction, departureAt: dep },
+            where: { routeId: route.id, direction: "TO_TERMINUS", trainId: train.id, departureAt: dep },
           });
           if (exists) continue;
           const driver = drivers[rr % drivers.length];
@@ -43,10 +74,61 @@ export async function ensureTrips(): Promise<number> {
             data: {
               routeId: route.id,
               driverId: driver.id,
-              direction,
+              direction: "TO_TERMINUS",
               departureAt: dep,
               capacity: driver.capacity,
               source: "schedule",
+              trainId: train.id,
+            },
+          });
+          created++;
+        }
+      } else {
+        // Arrival event at MTM → meet-and-drop shuttles leave after the buffer.
+        // Anchored on the arrival calendar day (night train's 03:55 arrival
+        // belongs to the train that left NTM 22:00 the previous evening).
+        const trainArr = dayAt(now, dayOffset, train.destTime);
+        const dep = new Date(trainArr.getTime() + cfg.trainMeetBufferMinutes * 60 * 1000);
+        for (const route of routes) {
+          if (dep.getTime() < now.getTime() - 30 * 60 * 1000) continue;
+          const exists = await db.trip.findFirst({
+            where: { routeId: route.id, direction: "FROM_TERMINUS", trainId: train.id, departureAt: dep },
+          });
+          if (exists) continue;
+          // Pair the return cab with the driver who ran the outbound for the
+          // same-named train within the last 24h (e.g. 08:00 departure ↔ 14:00 arrival).
+          const pairedDepTrain = trains.find((t) => t.direction === "MBA_TO_NBO" && t.name === train.name);
+          let driver: (typeof drivers)[number] | null = null;
+          if (pairedDepTrain) {
+            const outbound = await db.trip.findFirst({
+              where: {
+                routeId: route.id,
+                direction: "TO_TERMINUS",
+                trainId: pairedDepTrain.id,
+                departureAt: {
+                  gte: new Date(dep.getTime() - 24 * 60 * 60 * 1000),
+                  lte: dep,
+                },
+              },
+              orderBy: { departureAt: "desc" },
+            });
+            if (outbound?.driverId) {
+              driver = drivers.find((d) => d.id === outbound.driverId) || null;
+            }
+          }
+          if (!driver) {
+            driver = drivers[rr % drivers.length];
+            rr++;
+          }
+          await db.trip.create({
+            data: {
+              routeId: route.id,
+              driverId: driver.id,
+              direction: "FROM_TERMINUS",
+              departureAt: dep,
+              capacity: driver.capacity,
+              source: "schedule",
+              trainId: train.id,
             },
           });
           created++;
