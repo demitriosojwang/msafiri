@@ -172,7 +172,7 @@ function RefundsTab() {
                   </Badge>
                 )}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {reasonLabels[r.reason] || r.reason} · {r.method.toUpperCase()} · initiated {fmtDateTime(r.initiatedAt)}
                 {r.completedAt ? ` · completed ${fmtDateTime(r.completedAt)}` : ""}
               </p>
@@ -273,7 +273,7 @@ function PayoutsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <StatCard label="Queued" value={ksh(data?.totals.queued || 0)} tone="warn" />
         <StatCard label="Paid out" value={ksh(data?.totals.paid || 0)} tone="good" />
         <StatCard label="Commission realised" value={ksh(data?.totals.commission || 0)} tone="info" />
@@ -381,7 +381,7 @@ function CreditsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <StatCard label="Outstanding liability" value={ksh(data?.liability || 0)} sub="active credits, never cashed out" tone="info" />
         <StatCard label="Active" value={String(data?.counts.active || 0)} tone="good" />
         <StatCard label="Redeemed" value={String(data?.counts.redeemed || 0)} />
@@ -441,8 +441,8 @@ export default function AdminMoney() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Money & ledger</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Money & ledger</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           Collected into the Mi-Reli M-Pesa shortcode first — never straight to a driver. Every
           shilling sits in exactly one bucket before it moves again.
         </p>

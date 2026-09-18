@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { SiteFooter, SiteHeader } from "@/components/site-chrome";
-import { Badge } from "@/components/ui/badge";
+import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, useMe } from "@/lib/client";
 import { daysUntil, fmtDate, ksh } from "@/lib/format";
 import { Ticket, Wallet } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface CreditRow {
   id: string;
@@ -40,13 +40,14 @@ export default function CreditsPage() {
 
   if (!me?.session) {
     return (
-      <div className="flex min-h-screen flex-col">
+      <div className="flex min-h-screen flex-col bg-background">
         <SiteHeader />
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
           <Wallet className="h-10 w-10 text-muted-foreground" />
-          <p className="font-semibold">Sign in to see your travel credits</p>
+          <p className="font-semibold">Couldn&apos;t load your credits</p>
+          <p className="text-sm text-muted-foreground">Check your connection, then head back to booking.</p>
           <Button asChild>
-            <Link href="/login?next=/credits">Sign in</Link>
+            <Link href="/">Book a ride</Link>
           </Button>
         </main>
         <SiteFooter />
@@ -61,28 +62,29 @@ export default function CreditsPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">
-        <h1 className="text-2xl font-bold">Travel credits</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Credits are issued when you cancel after the trip locks — your fare is never lost. They
-          apply to any future ride, partial use supported, and they never expire into nothing:
-          whatever remains simply stops being redeemable after 30 days.
-        </p>
-
-        <Card className="mt-6 border-emerald-200 bg-gradient-to-br from-emerald-50 to-background">
-          <CardContent className="flex items-center justify-between p-6">
+    <div className="flex min-h-screen flex-col bg-background">
+      <SiteHeader subtitle="Travel credits" />
+      <SiteNav />
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8">
+        {/* Balance card with the gradient accent bar */}
+        <Card className="overflow-hidden">
+          <div className="mireli-accent-bar h-1.5 w-full" />
+          <CardContent className="flex items-center justify-between p-5">
             <div>
-              <p className="text-sm text-muted-foreground">Available balance</p>
-              <p className="text-3xl font-bold text-primary">{ksh(balance)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Available balance</p>
+              <p className="text-3xl font-bold tabular-nums text-primary">{ksh(balance)}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Partial use supported · valid 30 days · never expires into cash
+              </p>
             </div>
-            <Wallet className="h-10 w-10 text-primary/60" />
+            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10">
+              <Wallet className="h-7 w-7 text-primary" />
+            </div>
           </CardContent>
         </Card>
 
         <section className="mt-6">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Credit history</h2>
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Credit history</h2>
           {credits === null && <Skeleton className="h-24 w-full" />}
           {credits && credits.length === 0 && (
             <Card>
@@ -90,20 +92,26 @@ export default function CreditsPage() {
                 <Ticket className="h-7 w-7 text-muted-foreground" />
                 <p className="text-sm font-medium">No credits yet</p>
                 <p className="text-xs text-muted-foreground">
-                  If you ever cancel late, your fare lands here automatically.
+                  If you ever cancel after the trip locks, your fare lands here automatically.
                 </p>
               </CardContent>
             </Card>
           )}
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             {(credits || []).map((c) => (
               <Card key={c.id}>
-                <CardContent className="flex items-start justify-between gap-3 p-4">
+                <CardContent className="flex items-start justify-between gap-3 p-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={styles[c.status] || ""}>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
+                          styles[c.status] || "",
+                        )}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
                         {c.status}
-                      </Badge>
+                      </span>
                       {c.status === "active" && (
                         <span className="text-xs text-muted-foreground">
                           expires in {daysUntil(c.expiresAt)} days ({fmtDate(c.expiresAt)})
@@ -118,7 +126,12 @@ export default function CreditsPage() {
                       </p>
                     )}
                   </div>
-                  <p className={`shrink-0 text-lg font-bold ${c.status === "active" ? "text-primary" : "text-muted-foreground"}`}>
+                  <p
+                    className={cn(
+                      "shrink-0 text-lg font-bold tabular-nums",
+                      c.status === "active" ? "text-primary" : "text-muted-foreground",
+                    )}
+                  >
                     {ksh(c.amount)}
                   </p>
                 </CardContent>

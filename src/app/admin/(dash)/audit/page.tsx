@@ -30,8 +30,8 @@ export default function AdminAudit() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Audit log</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Audit log</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           Append-only record of every state-changing action — logins, bookings, payments,
           cancellations, config changes and payout runs. The trail you'll want when a dispute lands.
         </p>

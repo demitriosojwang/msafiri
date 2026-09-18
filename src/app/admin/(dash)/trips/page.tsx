@@ -113,8 +113,8 @@ export default function AdminTrips() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Trips & allocation</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight">Trips & allocation</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Auto-allocation places every booking on a departure. Trips lock at the cutoff or
             seat-fill threshold — that lock is the early/late refund boundary.
           </p>

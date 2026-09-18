@@ -44,72 +44,80 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.99 0.004 110);
-  --foreground: oklch(0.2 0.02 165);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.02 165);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.02 165);
-  --primary: oklch(0.44 0.11 168);
-  --primary-foreground: oklch(0.985 0.01 120);
-  --secondary: oklch(0.955 0.02 120);
-  --secondary-foreground: oklch(0.32 0.06 168);
-  --muted: oklch(0.96 0.01 120);
-  --muted-foreground: oklch(0.5 0.02 165);
-  --accent: oklch(0.95 0.06 90);
-  --accent-foreground: oklch(0.35 0.08 70);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0.015 140);
-  --input: oklch(0.91 0.015 140);
-  --ring: oklch(0.55 0.1 168);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.875rem;
+  /* Mi-Reli — Kenya coast palette
+     Navy = Indian Ocean depth, trust, infrastructure
+     Orange = sunset over Mombasa, warmth, energy, movement
+     Cream = sand, soft backdrop that lets the brand colors pop */
+  --background: oklch(0.98 0.008 75);       /* warm cream (sand) */
+  --foreground: oklch(0.18 0.04 260);        /* deep navy text */
+  --card: oklch(1 0.004 250);                /* pure white card */
+  --card-foreground: oklch(0.18 0.04 260);
+  --popover: oklch(1 0.004 250);
+  --popover-foreground: oklch(0.18 0.04 260);
+  /* Navy — rich, deep, slightly cooler than before */
+  --primary: oklch(0.28 0.07 258);
+  --primary-foreground: oklch(0.99 0.005 75);
+  /* Soft navy-tinted cream for secondary surfaces */
+  --secondary: oklch(0.94 0.018 75);
+  --secondary-foreground: oklch(0.28 0.07 258);
+  --muted: oklch(0.95 0.015 75);
+  --muted-foreground: oklch(0.48 0.025 258);
+  /* Sunset orange — vibrant but not neon */
+  --accent: oklch(0.67 0.19 42);
+  --accent-foreground: oklch(0.99 0.005 75);
+  --destructive: oklch(0.56 0.24 27);
+  --border: oklch(0.90 0.015 75);
+  --input: oklch(0.93 0.012 75);
+  --ring: oklch(0.67 0.19 42);
+  /* Status / chart colors — all harmonized with navy+orange base */
+  --chart-1: oklch(0.28 0.07 258);   /* navy */
+  --chart-2: oklch(0.67 0.19 42);    /* sunset orange */
+  --chart-3: oklch(0.60 0.13 165);   /* coastal palm green */
+  --chart-4: oklch(0.52 0.16 285);   /* twilight purple */
+  --chart-5: oklch(0.62 0.12 195);   /* ocean teal */
+  --sidebar: oklch(0.97 0.008 75);
+  --sidebar-foreground: oklch(0.18 0.04 260);
+  --sidebar-primary: oklch(0.28 0.07 258);
+  --sidebar-primary-foreground: oklch(0.99 0.005 75);
+  --sidebar-accent: oklch(0.94 0.018 75);
+  --sidebar-accent-foreground: oklch(0.28 0.07 258);
+  --sidebar-border: oklch(0.90 0.015 75);
+  --sidebar-ring: oklch(0.67 0.19 42);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --background: oklch(0.15 0.025 258);
+  --foreground: oklch(0.97 0.008 75);
+  --card: oklch(0.20 0.03 258);
+  --card-foreground: oklch(0.97 0.008 75);
+  --popover: oklch(0.20 0.03 258);
+  --popover-foreground: oklch(0.97 0.008 75);
+  --primary: oklch(0.67 0.19 42);
+  --primary-foreground: oklch(0.15 0.025 258);
+  --secondary: oklch(0.27 0.035 258);
+  --secondary-foreground: oklch(0.97 0.008 75);
+  --muted: oklch(0.27 0.035 258);
+  --muted-foreground: oklch(0.72 0.018 75);
+  --accent: oklch(0.67 0.19 42);
+  --accent-foreground: oklch(0.15 0.025 258);
+  --destructive: oklch(0.65 0.22 25);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --ring: oklch(0.67 0.19 42);
+  --chart-1: oklch(0.67 0.19 42);
+  --chart-2: oklch(0.60 0.13 165);
+  --chart-3: oklch(0.72 0.14 75);
+  --chart-4: oklch(0.65 0.18 285);
+  --chart-5: oklch(0.65 0.12 195);
+  --sidebar: oklch(0.20 0.03 258);
+  --sidebar-foreground: oklch(0.97 0.008 75);
+  --sidebar-primary: oklch(0.67 0.19 42);
+  --sidebar-primary-foreground: oklch(0.15 0.025 258);
+  --sidebar-accent: oklch(0.32 0.035 258);
+  --sidebar-accent-foreground: oklch(0.97 0.008 75);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.67 0.19 42);
 }
 
 @layer base {
@@ -118,7 +126,100 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Subtle warm gradient backdrop — like a soft coastal sky */
+    background-image:
+      radial-gradient(ellipse at top, oklch(0.96 0.025 75 / 0.6), transparent 60%),
+      radial-gradient(ellipse at bottom, oklch(0.95 0.02 258 / 0.3), transparent 50%);
+    background-attachment: fixed;
+    min-height: 100vh;
   }
 }
 
-/* mireli theme */
+@layer components {
+  /* Card with soft shadow + subtle border — feels lifted but not heavy */
+  .mireli-card {
+    @apply bg-card border border-border rounded-xl;
+    box-shadow:
+      0 1px 2px oklch(0.18 0.04 258 / 0.04),
+      0 4px 12px oklch(0.18 0.04 258 / 0.06);
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+  }
+  .mireli-card:hover {
+    box-shadow:
+      0 2px 4px oklch(0.18 0.04 258 / 0.06),
+      0 8px 20px oklch(0.18 0.04 258 / 0.10);
+  }
+  .mireli-card-tap:active {
+    transform: scale(0.985);
+  }
+
+  /* Gradient accent bar — used at top of primary cards */
+  .mireli-accent-bar {
+    background: linear-gradient(
+      90deg,
+      oklch(0.28 0.07 258) 0%,
+      oklch(0.40 0.10 258) 50%,
+      oklch(0.67 0.19 42) 100%
+    );
+  }
+
+  /* Pills (train selector, date picker, nav switcher) */
+  .mireli-pill {
+    @apply rounded-xl border transition-all duration-200;
+  }
+  .mireli-pill-active {
+    background: linear-gradient(135deg, oklch(0.28 0.07 258), oklch(0.35 0.09 260));
+    color: oklch(0.99 0.005 75);
+    border-color: oklch(0.28 0.07 258);
+    box-shadow: 0 4px 12px oklch(0.28 0.07 258 / 0.25);
+  }
+
+  /* Soft pulse for live indicators */
+  @keyframes mireli-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .mireli-live-dot {
+    animation: mireli-pulse 2s ease-in-out infinite;
+  }
+
+  /* Splash screen animations */
+  @keyframes mireli-splash-in {
+    0% { opacity: 0; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.02); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes mireli-splash-out {
+    0% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+  @keyframes mireli-fade-up {
+    0% { opacity: 0; transform: translateY(12px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mireli-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .mireli-splash-in {
+    animation: mireli-splash-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .mireli-splash-out {
+    animation: mireli-splash-out 0.4s ease-in forwards;
+  }
+  .mireli-fade-up {
+    animation: mireli-fade-up 0.5s ease-out both;
+  }
+
+  /* Shimmer loading bar */
+  .mireli-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(0.67 0.19 42 / 0.4) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: mireli-shimmer 1.5s linear infinite;
+  }
+}

@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,20 +64,20 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md" aria-describedby="pay-desc">
+    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto">
         {step === "phone" && (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
                 <Phone className="h-5 w-5 text-primary" /> Pay with M-Pesa
-              </DialogTitle>
-              <DialogDescription id="pay-desc">
-                {booking.code} · {ksh(booking.cashDue)} via Lipa na M-Pesa (STK push). Your money
-                is held by the platform until your ride is delivered.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
+              </SheetTitle>
+              <SheetDescription id="pay-desc">
+                {booking.code} · {ksh(booking.cashDue)} via Lipa na M-Pesa (STK push). Your money is
+                held by the platform until your ride is delivered.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="space-y-4 px-4 pb-4">
               <div className="space-y-2">
                 <Label htmlFor="mpesa-phone">M-Pesa number</Label>
                 <Input
@@ -92,10 +86,11 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
                   inputMode="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
+                  className="h-11"
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="w-full" onClick={sendPrompt} disabled={busy || phone.length < 9}>
+              <Button className="h-11 w-full" onClick={sendPrompt} disabled={busy || phone.length < 9}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : `Send M-Pesa prompt · ${ksh(booking.cashDue)}`}
               </Button>
             </div>
@@ -104,22 +99,22 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
 
         {step === "stk" && (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-primary" /> Check your phone
-              </DialogTitle>
-              <DialogDescription id="pay-desc">
-                An M-Pesa prompt has been sent to {phone}. Enter your PIN on the prompt, then
-                confirm below.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex flex-col items-center gap-4 py-4">
-              <span className="relative grid h-20 w-20 place-items-center rounded-full bg-emerald-100">
-                <MessageSquareText className="h-9 w-9 text-primary" />
-                <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-emerald-200/60" />
+              </SheetTitle>
+              <SheetDescription id="pay-desc">
+                An M-Pesa prompt has been sent to {phone}. Enter your PIN on the prompt, then confirm
+                below.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex flex-col items-center gap-4 px-4 pb-6 pt-2">
+              <span className="relative grid h-20 w-20 place-items-center rounded-full bg-accent/15">
+                <MessageSquareText className="h-9 w-9 text-accent" />
+                <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-accent/20" />
               </span>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="w-full" onClick={verify}>
+              <Button className="h-11 w-full" onClick={verify}>
                 I&apos;ve paid — verify
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setStep("phone")}>
@@ -130,7 +125,7 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
         )}
 
         {step === "verifying" && (
-          <div className="flex flex-col items-center gap-4 py-12">
+          <div className="flex flex-col items-center gap-4 px-4 py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground">Verifying payment…</p>
           </div>
@@ -138,45 +133,47 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
 
         {step === "done" && receipt && (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-primary">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2 text-primary">
                 <ShieldCheck className="h-5 w-5" /> Payment received
-              </DialogTitle>
-              <DialogDescription id="pay-desc">
+              </SheetTitle>
+              <SheetDescription id="pay-desc">
                 Your seat is confirmed. The money sits in the Mi-Reli ledger until your ride is
                 delivered — never with the driver directly.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="rounded-lg border bg-muted/40 p-4 text-sm">
-              <p className="flex items-center gap-2 font-semibold">
-                <ReceiptText className="h-4 w-4 text-primary" /> Receipt {booking.code}
-              </p>
-              <Separator className="my-3" />
-              <div className="grid grid-cols-2 gap-2">
-                <span className="text-muted-foreground">M-Pesa code</span>
-                <span className="text-right font-mono font-medium">{receipt.receipt}</span>
-                <span className="text-muted-foreground">Amount paid</span>
-                <span className="text-right font-medium">{ksh(receipt.amount)}</span>
-                {booking.routeName && (
-                  <>
-                    <span className="text-muted-foreground">Route</span>
-                    <span className="text-right font-medium">{booking.routeName}</span>
-                  </>
-                )}
-                {booking.stageName && (
-                  <>
-                    <span className="text-muted-foreground">Pickup</span>
-                    <span className="text-right font-medium">{booking.stageName}</span>
-                  </>
-                )}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+                <p className="flex items-center gap-2 font-semibold">
+                  <ReceiptText className="h-4 w-4 text-primary" /> Receipt {booking.code}
+                </p>
+                <Separator className="my-3" />
+                <div className="grid grid-cols-2 gap-2">
+                  <span className="text-muted-foreground">M-Pesa code</span>
+                  <span className="text-right font-mono font-medium">{receipt.receipt}</span>
+                  <span className="text-muted-foreground">Amount paid</span>
+                  <span className="text-right font-medium">{ksh(receipt.amount)}</span>
+                  {booking.routeName && (
+                    <>
+                      <span className="text-muted-foreground">Route</span>
+                      <span className="text-right font-medium">{booking.routeName}</span>
+                    </>
+                  )}
+                  {booking.stageName && (
+                    <>
+                      <span className="text-muted-foreground">Point</span>
+                      <span className="text-right font-medium">{booking.stageName}</span>
+                    </>
+                  )}
+                </div>
               </div>
+              <Button className="mt-4 w-full" onClick={onClose}>
+                Done
+              </Button>
             </div>
-            <Button className="w-full" onClick={onClose}>
-              Done
-            </Button>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

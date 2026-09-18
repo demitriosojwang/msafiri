@@ -44,3 +44,44 @@ Stage Summary:
 - Passenger-visible drop-off points on every return trip; pickup points on every outbound; all 22 station prices exactly as supplied (400 flat, Malindi 700, Diani Naivas 500).
 - Train times and buffers are admin-configurable; timetable is data (Train table), not code — changing a departure time in the DB reflows the whole shuttle schedule on the next tick.
 - Money engine untouched and re-verified: ledger buckets, partial credit redemption, STK collection all behave as specified.
+
+---
+Task ID: 3
+Agent: Super Z (main agent)
+Task: Apply the original Msafiri app look (uploaded workspace tar) to the Mi-Reli platform, keeping every requested feature (passenger-only, MTM/NTM train anchoring, real station prices, drop-off points on returns, ledger/money engine, hidden admin).
+
+Work Log:
+- Extracted the uploaded workspace tar to upload/original-workspace and studied the original UI system: Kenya-coast palette (navy oklch(0.28 0.07 258) / sunset orange oklch(0.67 0.19 42) / warm cream), msafiri-* component classes, max-w-md mobile app shell with sticky blurred header + logo tile + wordmark + subtitle, splash screen, bottom-sheet booking/payment, pill selectors, dot status badges, seat meter, compact admin.
+- Rebuilt globals.css with the exact original palette + component classes renamed mireli-* (card, accent-bar, pill, pill-active, live-dot, splash-in/out, fade-up, shimmer) incl. the body coastal gradient; radius 0.875rem; dark variant included.
+- Created public/mireli-logo.svg (navy tile, orange sunset arc, train glyph); favicon now uses it; themeColor set to navy.
+- New src/components/app/: splash-screen.tsx (exact original splash, once per browser session via useSplashOnce), login-screen.tsx (original centered logo + wordmark + tagline + OTP + first-time name + trust indicators, wired to real /api/auth), shared.tsx (DotBadge with pulsing dots, SeatMeter, Stars, TrainPill, CharterBadge, DatePicker Today/Tomorrow/Pick pills, SeatStepper).
+- site-chrome.tsx rewritten to the original chrome: LogoTile image, sticky max-w-md header with Info (About bottom sheet: trains we meet, points & fares with all 22 stations + prices, fare model, money safety — no driver section), SiteNav as the original pill switcher (Book / My rides / Credit · balance), tiny footer.
+- page.tsx rewritten as the original PassengerView: direction tabs, date pills, train pills (unique MTM events per direction: Arrives 04:00/14:00/20:30, Departs 08:00/15:00/22:00), drop-off/pickup point grid grouped by coast with per-point fare + door surcharge chips, options card (door-to-door toggle, charter toggle, live fare preview), seat stepper, cab cards (driver + stars + plate + train chip + seat meter + fare), my bookings with Pay now, LoginScreen gate when logged out, splash first.
+- booking-sheet.tsx converted from Dialog to original bottom Sheet (fare top-right, route info grid, train card, door address, fare breakdown + credit checkbox with partial-use note, reserve footer button → booking + auto-opens PaySheet); pay-sheet.tsx converted to bottom Sheet keeping phone → STK pulse → verify → receipt flow.
+- /login now renders the shared LoginScreen; /bookings restyled (max-w-md, DotBadge cards, h-8 action buttons); /credits restyled with mireli-accent-bar balance card + dot-styled credit statuses.
+- Admin: layout switched to the mobile shell; admin-nav.tsx rewritten as AdminChrome (header "Admin Console · oversight only" + horizontally scrollable text-[10px] pill nav + account strip); admin login restyled to original LoginScreen look with 2FA box; all 8 admin pages converted from viewport-responsive grids to fixed 2-col mobile grids; stat cards and page headers downscaled to mobile scale.
+- Fixed during build: lucide Home icon name collision with the Home component (aliased HomeIcon); react-hooks rules-of-hooks (moved all useMemo above splash/login early returns); set-state-in-effect (splash flag deferred via setTimeout); stale Turbopack CSS cache (green palette persisted after globals.css swap — killed dev server, rm -rf .next, restarted, navy #11284b confirmed served); eslint ignores upload/ so the extracted reference tar doesn't fail lint.
+- Browser verification (agent-browser, 414x896): splash exact look → login (0712345678/1234) → passenger home with welcome credit KSh 100 → train pills + point grid (North 17+Malindi 700·door+150, South 3+Diani 500·door+100) → options card + seat stepper → Nyali Center 400 → Reserve → bottom sheet → credit applied 400−100=300 → STK prompt → verified → receipt MR-TYWEXX (M-Pesa code ENQHXSCQAT) → My rides shows Confirmed w/ credit −KSh 100 → cancel dialog quotes "Early cancellation (before lock) — full cash refund" → Credits page balance 0, welcome credit redeemed → admin login demitri@mireli.co.ke + OTP + mireli2026 → Overview (collected today 600, queued payouts 340, buckets: held 400 incl. new booking, driver-payable 1,900, commission 1,500, refunded 400, credit 400) → Money & ledger shows MR-TYWEXX row → Trips & allocation cards with train chips → desktop 1440px renders centered phone column → About sheet verified → no page errors, no dev.log errors, eslint clean.
+
+Stage Summary:
+- Mi-Reli now wears the exact original Msafiri look end-to-end: same palette, same app shell, splash, login, pills, point grid, bottom sheets, dot badges, seat meter, mobile admin — while running the real Mi-Reli engine (train-anchored trips, station prices 400/500/700, ledger, credits 30 days, refund tiers, payouts, reconciliation, hidden admin).
+- All requested changes remain intact; nothing driver-facing exists on the passenger surface; admin remains identity-gated at /admin.
+- Screenshots: upload/look-01…look-18 (splash, login, home, options, booking sheet, STK, receipt, rides, tier quote, credits, admin login/overview/ledger/trips, desktop, about).
+
+---
+Task ID: 4
+Agent: Super Z (main agent)
+Task: Remove authentication from the passenger booking site so anyone can browse and book immediately (user: "can you remove the authentication since its a website for booking, i wanna see how it looks").
+
+Work Log:
+- Rebuilt /api/me as the frictionless identity choke point: if no valid passenger cookie exists it silently provisions a guest passenger (name "Guest", unique phone guest-<8hex>, 3-retry on collision), issues the same Karibu KSh 100 welcome credit (30-day validity per config), writes an auth.guest_start audit row, sets the signed passenger cookie (7 days), and returns the session — so every downstream API (bookings, pay, credits) works unchanged.
+- page.tsx: removed the LoginScreen gate, loginTick state, LoginScreen import (kept router which is still used); splash retained (pure visual, once per session).
+- site-chrome.tsx: removed the header Logout button + logout/api/useRouter wiring; header is now logo + wordmark + Info sheet only.
+- /bookings and /credits: unreachable "Sign in to see…" fallbacks replaced with "Couldn't load — check connection" + Book a ride CTA (no auth messaging anywhere on the passenger surface).
+- /login page + LoginScreen component kept as a hidden URL (not linked from any UI) for a future claim-your-bookings flow; admin auth completely untouched (/admin still 307s to /admin/login).
+- Verified: tsc src clean; eslint clean on all 5 touched files; curl /api/me twice → same guest session on second call (cookie persists); browser end-to-end as guest: splash → straight to booking UI with Credit · KSh 100 in nav → Nyali Center 400 → reserve → bottom sheet credit checkbox → partial redemption 400−100=300 → STK → receipt MR-Q4TYAU / M-Pesa 6C374EN3C2 → My rides Confirmed w/ driver Juma Hassan → Credits page shows welcome credit redeemed; fresh-context session also boots straight to splash→booking with no wall; admin gate re-confirmed; dev.log clean.
+- Screenshots: upload/guest-01…guest-09 (landing, point grid, sheet, pay, stk, receipt, rides, credits, fresh splash).
+
+Stage Summary:
+- The passenger site is now auth-free: zero OTP walls, zero sign-in prompts; identity is an invisible server-side guest session that still gives every visitor the full money story (welcome credit, partial redemption, ledger-held fares).
+- Admin oversight console remains the only gated surface, exactly as the user specified.

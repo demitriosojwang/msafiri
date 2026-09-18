@@ -21,10 +21,10 @@ export function StatCard({
   };
   return (
     <Card className={cn(tones[tone])}>
-      <CardContent className="p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-bold tracking-tight">{value}</p>
-        {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
+      <CardContent className="p-3">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mt-1 text-lg font-bold tracking-tight tabular-nums">{value}</p>
+        {sub && <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
   );

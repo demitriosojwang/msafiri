@@ -47,14 +47,14 @@ export default function AdminOverview() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Overview</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           Your oversight surface: totals and exceptions. The engine moves the money — you watch the
           buckets and step in when something flags.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <StatCard label="Collected today" value={ksh(data.today.collected)} sub={`${data.today.bookings} bookings placed`} tone="good" />
         <StatCard label="Commission today" value={ksh(data.today.commission)} sub={`rate ${(data.config.commissionRate * 100).toFixed(1)}% (NTSA cap 18%)`} tone="info" />
         <StatCard label="Paid out today" value={ksh(data.today.paidOut)} sub={`${data.config.payoutMode} mode`} />
@@ -74,7 +74,7 @@ export default function AdminOverview() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2">
             {Object.entries(data.buckets).map(([bucket, v]) => (
               <div key={bucket} className="rounded-lg border bg-muted/30 p-3">
                 <p className="text-xs font-medium text-muted-foreground">{LEDGER_LABELS[bucket] || bucket}</p>
@@ -144,7 +144,7 @@ export default function AdminOverview() {
               cta="See bookings"
             />
           )}
-          <div className="grid gap-2 pt-1 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 pt-1">
             <div className="rounded-md border p-3 text-sm">
               <p className="font-medium">Credit liability</p>
               <p className="text-muted-foreground">
@@ -187,7 +187,7 @@ export default function AdminOverview() {
 
 function AlertRow({ title, detail, href, cta }: { title: string; detail: string; href: string; cta: string }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
       <div>
         <p className="flex items-center gap-1.5 text-sm font-medium text-amber-950">
           <BadgeAlert className="h-4 w-4" /> {title}
@@ -205,7 +205,7 @@ function Loading() {
   return (
     <div className="space-y-4">
       <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
         ))}

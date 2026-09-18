@@ -2,43 +2,39 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { PaySheet } from "@/components/pay-sheet";
 import { api, useMe } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { Car, CreditCard, Home, Loader2, MapPin, Users } from "lucide-react";
+import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront } from "lucide-react";
+import { DotBadge, Stars } from "@/components/app/shared";
 
-interface Stage {
+export interface Stage {
   id: string;
   name: string;
   order: number;
   fare: number;
   homeSurcharge: number;
 }
+
 export interface TrainInfo {
   name: string;
   mtmTime: string;
   ntmTime: string;
   eventKind: "departs_mtm" | "arrives_mtm";
 }
+
 export interface BookableTrip {
   id: string;
   routeId: string;
@@ -59,6 +55,17 @@ export interface BookableTrip {
   driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
+/** Everything the main view collected before the sheet opens. */
+export interface BookingDraft {
+  trip: BookableTrip;
+  stageId: string;
+  seats: number;
+  charter: boolean;
+  homePickup: boolean;
+  homeAddress: string;
+  useCredit: boolean;
+}
+
 interface CreateResponse {
   booking: {
     id: string;
@@ -76,19 +83,15 @@ interface CreateResponse {
 export function BookingSheet({
   open,
   onClose,
-  trip,
+  draft,
   onBooked,
 }: {
   open: boolean;
   onClose: () => void;
-  trip: BookableTrip | null;
+  draft: BookingDraft | null;
   onBooked: () => void;
 }) {
-  const { me, refresh } = useMe();
-  const [stageId, setStageId] = useState<string>("");
-  const [seats, setSeats] = useState(1);
-  const [charter, setCharter] = useState(false);
-  const [homePickup, setHomePickup] = useState(false);
+  const { refresh } = useMe();
   const [homeAddress, setHomeAddress] = useState("");
   const [useCredit, setUseCredit] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -96,35 +99,30 @@ export function BookingSheet({
   const [created, setCreated] = useState<CreateResponse["booking"] | null>(null);
   const [payOpen, setPayOpen] = useState(false);
 
+  const { me } = useMe();
   const creditBalance = me?.creditBalance || 0;
 
   useEffect(() => {
-    if (open && trip) {
-      // default: farthest point for FROM_TERMINUS (drop-off), first coast
-      // stage for TO_TERMINUS (pickup) — the terminus itself is never a point
-      const usable = trip.stages.filter((s) => s.order > 0);
-      const def = trip.direction === "FROM_TERMINUS" ? usable[usable.length - 1] : usable[0];
-      setStageId(def?.id || "");
-      setSeats(1);
-      setCharter(false);
-      setHomePickup(false);
-      setHomeAddress("");
-      setUseCredit(false);
+    if (open && draft) {
+      setHomeAddress(draft.homeAddress || "");
+      setUseCredit(draft.useCredit);
       setError(null);
       setCreated(null);
       setPayOpen(false);
     }
-  }, [open, trip]);
+  }, [open, draft]);
 
-  const stage = useMemo(() => trip?.stages.find((s) => s.id === stageId), [trip, stageId]);
-  const fare = trip ? (charter ? trip.charterPrice : (stage?.fare || 0) * seats) : 0;
-  const surcharge = homePickup ? (charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * seats) : 0;
+  const trip = draft?.trip;
+  const stage = useMemo(() => trip?.stages.find((s) => s.id === draft?.stageId), [trip, draft?.stageId]);
+
+  const fare = trip ? (draft?.charter ? trip.charterPrice : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
+  const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
   const total = fare + surcharge;
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
 
   async function confirm() {
-    if (!trip) return;
+    if (!trip || !draft) return;
     setBusy(true);
     setError(null);
     try {
@@ -132,21 +130,21 @@ export function BookingSheet({
         body: {
           routeId: trip.routeId,
           direction: trip.direction,
-          stageId,
-          homePickup,
-          homeAddress: homePickup ? homeAddress : undefined,
-          seats: charter ? 1 : seats,
-          isCharter: charter,
+          stageId: draft.stageId,
+          homePickup: draft.homePickup,
+          homeAddress: draft.homePickup ? homeAddress : undefined,
+          seats: draft.charter ? 1 : draft.seats,
+          isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
           travelDate: trip.departureAt.slice(0, 10),
         },
       });
       setCreated(res.booking);
       await refresh();
+      onBooked();
       if (res.booking.cashDue > 0) {
         setPayOpen(true);
       }
-      onBooked();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Booking failed");
     } finally {
@@ -154,216 +152,198 @@ export function BookingSheet({
     }
   }
 
-  if (!trip) return null;
+  if (!trip || !draft) return null;
+
+  const isCharter = draft.charter;
 
   return (
     <>
-      <Dialog open={open && !payOpen} onOpenChange={(v) => !v && onClose()}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg" aria-describedby="book-desc">
-          {!created ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Book your ride</DialogTitle>
-                <DialogDescription id="book-desc">
-                  Departs {fmtTime(trip.departureAt)} · {trip.seatsLeft} seats left
-                  {trip.driver ? ` · ${trip.driver.name} (${trip.driver.plate})` : ""}
-                  {trip.train
-                    ? trip.direction === "FROM_TERMINUS"
-                      ? ` · meets the ${trip.train.name} arriving MTM ${trip.train.mtmTime}`
-                      : ` · connects to the ${trip.train.name} departing MTM ${trip.train.mtmTime}`
-                    : ""}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-5">
-                <div className="flex items-center justify-between rounded-lg border p-3">
-                  <div className="flex items-center gap-2">
-                    <Car className="h-4 w-4 text-primary" />
-                    <div>
-                      <p className="text-sm font-medium">Private charter</p>
-                      <p className="text-xs text-muted-foreground">The whole cab to yourself · {ksh(trip.charterPrice)}</p>
-                    </div>
-                  </div>
-                  <Switch checked={charter} onCheckedChange={setCharter} aria-label="Book as private charter" />
-                </div>
-
-                {!charter && (
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1.5">
-                      <Users className="h-4 w-4 text-primary" /> Seats
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" onClick={() => setSeats(Math.max(1, seats - 1))} aria-label="Fewer seats">−</Button>
-                      <span className="w-10 text-center text-lg font-semibold">{seats}</span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => setSeats(Math.min(trip.seatsLeft, seats + 1))}
-                        aria-label="More seats"
-                      >
-                        +
-                      </Button>
-                      <span className="text-xs text-muted-foreground">max {trip.seatsLeft}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1.5">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    {trip.direction === "FROM_TERMINUS" ? "Drop-off point" : "Pickup point"}
-                  </Label>
-                  <Select value={stageId} onValueChange={setStageId}>
-                    <SelectTrigger aria-label={trip.direction === "FROM_TERMINUS" ? "Select drop-off point" : "Select pickup point"}>
-                      <SelectValue
-                        placeholder={trip.direction === "FROM_TERMINUS" ? "Choose your drop-off point" : "Choose your pickup point"}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {trip.stages
-                        .filter((s) => s.order > 0)
-                        .map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.name} · {ksh(s.fare)}/seat
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {trip.direction === "FROM_TERMINUS"
-                      ? "The cab drops you at any of these points — pick where it's easiest."
-                      : "Shared-ride pickup points along the route — be at your point 10 minutes early."}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border p-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Home className="h-4 w-4 text-primary" />
-                      <div>
-                        <p className="text-sm font-medium">Door-to-door pickup</p>
-                        <p className="text-xs text-muted-foreground">
-                          {stage ? `+${ksh(stage.homeSurcharge)}/seat — passes to the driver in full` : ""}
-                        </p>
-                      </div>
-                    </div>
-                    <Switch checked={homePickup} onCheckedChange={setHomePickup} aria-label="Home pickup" />
-                  </div>
-                  {homePickup && (
-                    <Input
-                      placeholder="Where should the cab pick you up?"
-                      value={homeAddress}
-                      onChange={(e) => setHomeAddress(e.target.value)}
-                      aria-label="Home pickup address"
-                    />
+      <Sheet open={open && !payOpen} onOpenChange={(v) => !v && onClose()}>
+        <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto">
+          <SheetHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <SheetTitle className="flex flex-wrap items-center gap-2 text-xl">
+                  {trip.driver ? `${trip.driver.name}'s ${trip.driver.cabType}` : trip.routeName}
+                  {isCharter && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] text-violet-900">
+                      <Crown className="h-3 w-3" /> Private charter
+                    </span>
                   )}
-                </div>
-
-                {creditBalance > 0 && (
-                  <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                    <Checkbox
-                      id="use-credit"
-                      checked={useCredit}
-                      onCheckedChange={(v) => setUseCredit(v === true)}
-                      className="mt-0.5"
-                    />
-                    <div>
-                      <Label htmlFor="use-credit" className="font-medium">
-                        Use travel credit — {ksh(creditBalance)} available
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Partial use supported — any leftover stays as credit for your next ride.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="rounded-lg bg-muted/50 p-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{charter ? "Charter fare" : `Fare × ${seats}`}</span>
-                    <span>{ksh(fare)}</span>
-                  </div>
-                  {surcharge > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Home pickup surcharge</span>
-                      <span>{ksh(surcharge)}</span>
-                    </div>
-                  )}
-                  {creditApplied > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Travel credit applied</span>
-                      <span>−{ksh(creditApplied)}</span>
-                    </div>
-                  )}
-                  <Separator className="my-2" />
-                  <div className="flex justify-between font-semibold">
-                    <span>To pay now</span>
-                    <span>{cashDue > 0 ? ksh(cashDue) : "Nothing — credit covers it"}</span>
-                  </div>
-                </div>
-
-                {error && <p className="text-sm text-destructive">{error}</p>}
-
-                <Button className="w-full" onClick={confirm} disabled={busy || !stageId}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : cashDue > 0 ? (
-                    <>Continue to payment · {ksh(cashDue)}</>
-                  ) : (
-                    <>
-                      <CreditCard className="h-4 w-4 mr-1" /> Confirm with credit
-                    </>
-                  )}
-                </Button>
+                </SheetTitle>
+                <SheetDescription className="mt-1 flex flex-wrap items-center gap-2">
+                  {trip.driver && <Stars rating={trip.driver.rating} />}
+                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
+                  {trip.driver && <span className="font-mono text-xs">{trip.driver.plate}</span>}
+                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
+                  <DotBadge status={trip.status} />
+                </SheetDescription>
               </div>
-            </>
+              <div className="shrink-0 text-right">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
+                </div>
+                <div className="text-2xl font-bold tabular-nums text-primary">{ksh(total)}</div>
+                {!isCharter && draft.seats > 1 && (
+                  <div className="text-[10px] text-muted-foreground">
+                    {draft.seats} × {ksh(stage?.fare || 0)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </SheetHeader>
+
+          {created ? (
+            <div className="space-y-4 px-4 pb-2">
+              <div className="flex flex-col items-center gap-2 py-4 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
+                  <TicketIcon className="h-7 w-7 text-emerald-600" />
+                </div>
+                <h3 className="text-lg font-semibold">Booking {created.code} placed!</h3>
+                <p className="max-w-xs text-sm text-muted-foreground">
+                  {created.cashDue > 0
+                    ? "Complete the M-Pesa payment to confirm your seat."
+                    : "Fully covered by your travel credit — your seat is confirmed."}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Trip value</span>
+                  <span className="font-medium">{ksh(created.fareAmount)}</span>
+                </div>
+                {created.creditApplied > 0 && (
+                  <div className="flex justify-between text-emerald-700">
+                    <span>Paid with credit</span>
+                    <span>−{ksh(created.creditApplied)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">M-Pesa</span>
+                  <span className="font-medium">{ksh(created.cashDue)}</span>
+                </div>
+                {created.allocationNote && (
+                  <p className="mt-2 text-xs text-muted-foreground">{created.allocationNote}</p>
+                )}
+              </div>
+              {created.cashDue > 0 ? (
+                <Button className="w-full" onClick={() => setPayOpen(true)}>
+                  Pay {ksh(created.cashDue)} with M-Pesa
+                </Button>
+              ) : (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+                  No cash moves until your ride is delivered — it all sits in the Mi-Reli ledger.
+                </div>
+              )}
+              <Button variant="outline" className="w-full" onClick={onClose}>
+                {created.cashDue > 0 ? "Pay later from My rides" : "Done"}
+              </Button>
+            </div>
           ) : (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-primary">Booking {created.code} placed</DialogTitle>
-                <DialogDescription id="book-desc">
-                  {created.trip?.departureAt
-                    ? `Departs ${fmtTime(created.trip.departureAt)}`
-                    : "Awaiting allocation"}{" "}
-                  · {created.stageName}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-3 text-sm">
-                <div className="rounded-lg border bg-muted/40 p-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Trip value</span>
-                    <span className="font-medium">{ksh(created.fareAmount)}</span>
+            <div className="space-y-4 px-4 pb-2">
+              {/* Route info */}
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-lg bg-secondary/60 p-3">
+                  <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <MapPin className="h-3 w-3" />{" "}
+                    {draft.homePickup
+                      ? trip.direction === "FROM_TERMINUS"
+                        ? "Drop-off near"
+                        : "Pickup near"
+                      : trip.direction === "FROM_TERMINUS"
+                        ? "Drop-off point"
+                        : "Pickup point"}
                   </div>
-                  {created.creditApplied > 0 && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Paid with credit</span>
-                      <span>−{ksh(created.creditApplied)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">M-Pesa</span>
-                    <span className="font-medium">{ksh(created.cashDue)}</span>
+                  <div className="font-medium">{stage?.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {draft.homePickup ? "door-to-door" : "shared stage"} · {trip.routeName.includes("North") ? "North" : "South"} Coast
                   </div>
-                  {created.allocationNote && (
-                    <p className="mt-2 text-xs text-muted-foreground">{created.allocationNote}</p>
-                  )}
                 </div>
-                {created.cashDue > 0 ? (
-                  <Button className="w-full" onClick={() => setPayOpen(true)}>
-                    Pay {ksh(created.cashDue)} with M-Pesa
-                  </Button>
-                ) : (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
-                    Fully covered by your credit — your seat is confirmed. No cash moves until your
-                    ride is delivered.
+                <div className="rounded-lg bg-secondary/60 p-3">
+                  <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <TrainFront className="h-3 w-3" /> Train
+                  </div>
+                  <div className="font-medium">{trip.train?.name ?? "Shuttle"}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {trip.direction === "FROM_TERMINUS"
+                      ? `Meets · MTM ${trip.train?.mtmTime ?? fmtTime(trip.departureAt)}`
+                      : `Catches · MTM ${trip.train?.mtmTime ?? fmtTime(trip.departureAt)}`}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Cab departs {fmtTime(trip.departureAt)}</div>
+                </div>
+              </div>
+
+              {draft.homePickup && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="draft-address" className="flex items-center gap-1 text-xs">
+                    <Home className="h-3 w-3" /> Door-to-door address
+                  </Label>
+                  <Input
+                    id="draft-address"
+                    value={homeAddress}
+                    onChange={(e) => setHomeAddress(e.target.value)}
+                    placeholder="e.g. Near Naivas Bamburi, gate 2"
+                    className="h-9"
+                  />
+                </div>
+              )}
+
+              {/* Fare breakdown */}
+              <div className="space-y-1.5 rounded-lg border bg-card p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{isCharter ? "Charter fare" : `Fare × ${draft.seats}`}</span>
+                  <span className="font-medium tabular-nums">{ksh(fare)}</span>
+                </div>
+                {surcharge > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Door-to-door surcharge (to driver in full)</span>
+                    <span className="font-medium tabular-nums">+{ksh(surcharge)}</span>
                   </div>
                 )}
-                <Button variant="outline" className="w-full" onClick={onClose}>
-                  {created.cashDue > 0 ? "Pay later from My bookings" : "Done"}
-                </Button>
+                {creditBalance > 0 && (
+                  <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                    <Checkbox checked={useCredit} onCheckedChange={(v) => setUseCredit(v === true)} className="mt-0.5" />
+                    <span className="text-emerald-900">
+                      Use travel credit — {ksh(creditBalance)} available
+                      <span className="block text-[10px] text-emerald-800">
+                        Partial use supported — leftover stays as credit, valid 30 days.
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {creditApplied > 0 && (
+                  <div className="flex items-center justify-between text-emerald-700">
+                    <span>Travel credit applied</span>
+                    <span className="font-medium tabular-nums">−{ksh(creditApplied)}</span>
+                  </div>
+                )}
+                <Separator className="my-1" />
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">To pay now</span>
+                  <span className="text-sm font-bold tabular-nums text-primary">
+                    {cashDue > 0 ? ksh(cashDue) : "Nothing — credit covers it"}
+                  </span>
+                </div>
               </div>
-            </>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+            </div>
           )}
-        </DialogContent>
-      </Dialog>
+
+          {!created && (
+            <SheetFooter className="px-4 pb-4">
+              <Button className="h-11 w-full" disabled={busy || !draft.stageId} onClick={confirm}>
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isCharter ? (
+                  `Book charter · ${ksh(total)}`
+                ) : (
+                  `Reserve ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
+                )}
+              </Button>
+            </SheetFooter>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {created && (
         <PaySheet
@@ -380,9 +360,7 @@ export function BookingSheet({
             departureAt: created.trip?.departureAt,
             stageName: created.stageName,
           }}
-          onPaid={() => {
-            onBooked();
-          }}
+          onPaid={onBooked}
         />
       )}
     </>

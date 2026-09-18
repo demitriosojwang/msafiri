@@ -73,14 +73,14 @@ export default function AdminConfig() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Config</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Config</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           These levers drive every money decision — refund tiers, credit validity, commission and
           payout timing. Policy is config-driven, never hardcoded per transaction.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Commission & refunds</CardTitle>

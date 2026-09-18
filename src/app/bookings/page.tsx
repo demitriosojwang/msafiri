@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { SiteFooter, SiteHeader } from "@/components/site-chrome";
-import { BookingStatusBadge } from "@/components/status-badges";
+import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { PaySheet } from "@/components/pay-sheet";
+import { DotBadge } from "@/components/app/shared";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +27,7 @@ import {
   Car,
   CheckCircle2,
   CreditCard,
+  Crown,
   Home,
   Loader2,
   MapPin,
@@ -130,7 +131,7 @@ export default function BookingsPage() {
     setCheckingIn(b.id);
     try {
       await api(`/api/bookings/${b.id}`, { body: { action: "checkin" } });
-      toast({ title: "Checked in", description: "The driver will meet you at your pickup point." });
+      toast({ title: "Checked in", description: "The driver will meet you at your point." });
       await load();
     } catch (e) {
       toast({ title: "Check-in failed", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
@@ -143,13 +144,14 @@ export default function BookingsPage() {
 
   if (!me?.session) {
     return (
-      <div className="flex min-h-screen flex-col">
+      <div className="flex min-h-screen flex-col bg-background">
         <SiteHeader />
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
           <Ticket className="h-10 w-10 text-muted-foreground" />
-          <p className="font-semibold">Sign in to see your bookings</p>
+          <p className="font-semibold">Couldn&apos;t load your session</p>
+          <p className="text-sm text-muted-foreground">Check your connection, then head back to booking.</p>
           <Button asChild>
-            <Link href="/login?next=/bookings">Sign in</Link>
+            <Link href="/">Book a ride</Link>
           </Button>
         </main>
         <SiteFooter />
@@ -161,23 +163,24 @@ export default function BookingsPage() {
   const past = (bookings || []).filter((b) => ["cancelled", "completed", "no_show"].includes(b.status));
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">
-        <h1 className="text-2xl font-bold">My bookings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your fare is held by the platform until your ride is delivered — never paid directly to a driver.
+    <div className="flex min-h-screen flex-col bg-background">
+      <SiteHeader subtitle="My rides" />
+      <SiteNav />
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8">
+        <p className="mb-4 text-xs text-muted-foreground">
+          Your fare is held by the platform until your ride is delivered — never paid directly to a
+          driver.
         </p>
 
         {bookings === null && (
-          <div className="mt-6 grid gap-3">
-            <Skeleton className="h-36 w-full" />
-            <Skeleton className="h-36 w-full" />
+          <div className="grid gap-3">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
           </div>
         )}
 
         {bookings !== null && bookings.length === 0 && (
-          <Card className="mt-6">
+          <Card>
             <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
               <Ticket className="h-8 w-8 text-muted-foreground" />
               <p className="font-medium">No bookings yet</p>
@@ -190,9 +193,9 @@ export default function BookingsPage() {
         )}
 
         {upcoming.length > 0 && (
-          <section className="mt-6">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming</h2>
-            <div className="grid gap-3">
+          <section>
+            <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Upcoming</h2>
+            <div className="grid gap-2">
               {upcoming.map((b) => (
                 <BookingCard
                   key={b.id}
@@ -208,9 +211,9 @@ export default function BookingsPage() {
         )}
 
         {past.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">History</h2>
-            <div className="grid gap-3">
+          <section className="mt-6">
+            <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">History</h2>
+            <div className="grid gap-2">
               {past.map((b) => (
                 <PastCard key={b.id} b={b} />
               ))}
@@ -249,7 +252,7 @@ export default function BookingsPage() {
                 {!quote && <Loader2 className="h-4 w-4 animate-spin" />}
                 {quote && (
                   <>
-                    <p className="rounded-md border bg-muted/40 p-3 text-sm">
+                    <p className="rounded-lg border bg-muted/40 p-3 text-sm">
                       <span className="font-semibold text-foreground">
                         {quote.tier ? TIER_LABELS[quote.tier] : quote.detail}
                       </span>
@@ -302,16 +305,16 @@ function BookingCard({
   checkingIn: boolean;
 }) {
   return (
-    <Card>
-      <CardContent className="p-4">
+    <Card className="mireli-card-tap">
+      <CardContent className="space-y-2 p-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-semibold">{b.code}</span>
-              <BookingStatusBadge status={b.status} />
+              <DotBadge status={b.status} />
               {b.isCharter && (
-                <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">
-                  Charter
+                <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] text-violet-900">
+                  <Crown className="h-2.5 w-2.5" /> Charter
                 </span>
               )}
             </div>
@@ -323,7 +326,6 @@ function BookingCard({
             <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
               <MapPin className="h-4 w-4" /> {b.stageName}
               {b.homePickup && <Home className="h-3.5 w-3.5" />}
-              {b.routeName ? ` · ${b.routeName}` : ""}
             </p>
             {b.driver && (
               <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -344,24 +346,24 @@ function BookingCard({
         </div>
 
         {b.lockNote && b.status === "confirmed" && (
-          <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{b.lockNote}</p>
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{b.lockNote}</p>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {b.canPay && (
-            <Button size="sm" onClick={onPay}>
-              <CreditCard className="h-4 w-4" /> Pay {ksh(b.cashDue)} now
+            <Button size="sm" className="h-8" onClick={onPay}>
+              <CreditCard className="h-3.5 w-3.5" /> Pay {ksh(b.cashDue)} now
             </Button>
           )}
           {b.canCheckIn && (
-            <Button size="sm" variant="outline" onClick={onCheckIn} disabled={checkingIn}>
-              {checkingIn ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              I&apos;m at the pickup point
+            <Button size="sm" variant="outline" className="h-8" onClick={onCheckIn} disabled={checkingIn}>
+              {checkingIn ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              I&apos;m at the point
             </Button>
           )}
           {b.canCancel && (
-            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={onCancel}>
-              <TicketX className="h-4 w-4" /> Cancel
+            <Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive" onClick={onCancel}>
+              <TicketX className="h-3.5 w-3.5" /> Cancel
             </Button>
           )}
         </div>
@@ -373,18 +375,18 @@ function BookingCard({
 function PastCard({ b }: { b: BookingRow }) {
   return (
     <Card>
-      <CardContent className="p-4">
+      <CardContent className="space-y-2 p-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-semibold">{b.code}</span>
-              <BookingStatusBadge status={b.status} />
+              <DotBadge status={b.status} />
               {b.cancelTier && (
                 <span className="text-xs text-muted-foreground">{TIER_LABELS[b.cancelTier]}</span>
               )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {fmtDateTime(b.departureAt || b.createdAt)} · {b.routeName || "Route"} · {b.stageName}
+              {fmtDateTime(b.departureAt || b.createdAt)} · {b.stageName}
             </p>
             {b.ledger?.receipt && (
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">M-Pesa {b.ledger.receipt}</p>
@@ -402,13 +404,13 @@ function PastCard({ b }: { b: BookingRow }) {
           </div>
         </div>
         {b.status === "no_show" && (
-          <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-900">
-            The seat was held and the driver went to the stage for it — the fare was forfeited per
+          <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-900">
+            The seat was held and the driver went to the point for it — the fare was forfeited per
             the cancellation policy.
           </p>
         )}
         {b.status === "cancelled" && b.cancelTier === "late" && (
-          <p className="mt-2 rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-900">
+          <p className="rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-900">
             Your fare was saved as travel credit — see the Credits page. Valid 30 days.
           </p>
         )}

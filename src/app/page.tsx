@@ -1,369 +1,520 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SiteFooter, SiteHeader } from "@/components/site-chrome";
-import { BookingSheet, BookableTrip } from "@/components/booking-sheet";
-import { TripStatusBadge } from "@/components/status-badges";
+import { motion, AnimatePresence } from "framer-motion";
+import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
+import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
+import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
-  ArrowRightLeft,
-  Banknote,
+  DatePicker,
+  DotBadge,
+  SeatMeter,
+  SeatStepper,
+  Stars,
+  TrainPill,
+  CharterBadge,
+  fmtDateShort,
+} from "@/components/app/shared";
+import {
+  Anchor,
   CalendarDays,
   Car,
   Clock,
-  MapPinCheck,
-  Search,
-  ShieldCheck,
-  Star,
-  TrainFront,
+  Crown,
+  Home as HomeIcon,
+  Info,
+  MapPin,
+  Navigation,
+  Sparkles,
+  Ticket as TicketIcon,
+  Train as TrainIcon,
+  Users,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-function todayStr(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
-}
-
-interface TrainSchedule {
+interface RouteInfo {
   id: string;
   name: string;
-  direction: string;
-  originCode: string;
-  destCode: string;
-  originTime: string;
-  destTime: string;
-  destDayOffset: number;
+  durationMinutes: number;
+  charterPrice: number;
+  stages: { id: string; name: string; order: number; fare: number; homeSurcharge: number }[];
+}
+
+interface BookingRow {
+  id: string;
+  code: string;
+  stageName: string | null;
+  status: string;
+  cashDue: number;
+  isCharter: boolean;
+  departureAt: string | null;
+  driver: { name: string; plate: string } | null;
+}
+
+function coastOf(routeName: string): "north" | "south" {
+  return routeName.toLowerCase().includes("south") ? "south" : "north";
 }
 
 export default function Home() {
-  const { me, loading: meLoading } = useMe();
+  const { me } = useMe();
   const router = useRouter();
-  const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [date, setDate] = useState(todayStr());
-  const [trips, setTrips] = useState<BookableTrip[] | null>(null);
-  const [searched, setSearched] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<BookableTrip | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [trains, setTrains] = useState<TrainSchedule[]>([]);
+  const splashSeen = useSplashOnce();
+  const [splashDone, setSplashDone] = useState(false);
 
-  useEffect(() => {
-    api<{ trains: TrainSchedule[] }>("/api/trains")
-      .then((r) => setTrains(r.trains))
-      .catch(() => {});
-  }, []);
+  const showSplash = splashSeen && !splashDone;
+
+  const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
+  const [date, setDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [routes, setRoutes] = useState<RouteInfo[]>([]);
+  const [trips, setTrips] = useState<BookableTrip[] | null>(null);
+  const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // selection state (original store equivalents)
+  const [trainKey, setTrainKey] = useState<string | null>(null);
+  const [pointId, setPointId] = useState<string | null>(null);
+  const [homePickup, setHomePickup] = useState(false);
+  const [charter, setCharter] = useState(false);
+  const [seats, setSeats] = useState(1);
+
+  const [draft, setDraft] = useState<BookingDraft | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [payFor, setPayFor] = useState<BookingRow | null>(null);
+
+  const isAuthed = !!me?.session;
 
   const loadTrips = useCallback(async (dir: string, d: string) => {
     setLoading(true);
     try {
       const res = await api<{ trips: BookableTrip[] }>(`/api/trips?date=${d}&direction=${dir}`);
       setTrips(res.trips);
-      setSearched(true);
+    } catch {
+      setTrips([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadTrips(direction, date);
+  const loadMyBookings = useCallback(async () => {
+    try {
+      const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
+      setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+    } catch {
+      setMyBookings([]);
+    }
   }, []);
 
-  function switchDirection(dir: "FROM_TERMINUS" | "TO_TERMINUS") {
-    setDirection(dir);
-    loadTrips(dir, date);
-  }
+  useEffect(() => {
+    api<{ routes: RouteInfo[] }>("/api/routes")
+      .then((r) => setRoutes(r.routes))
+      .catch(() => {});
+  }, []);
 
-  function book(trip: BookableTrip) {
-    if (meLoading) return;
-    if (!me?.session) {
-      router.push("/login?next=book");
-      return;
-    }
-    setSelected(trip);
+  useEffect(() => {
+    if (isAuthed) loadMyBookings();
+  }, [isAuthed, loadMyBookings]);
+
+  useEffect(() => {
+    if (showSplash || !isAuthed) return;
+    loadTrips(direction, date);
+  }, [showSplash, isAuthed, direction, date, loadTrips]);
+
+  function openBooking(trip: BookableTrip) {
+    const fallbackStage =
+      direction === "FROM_TERMINUS"
+        ? trip.stages.filter((s) => s.order > 0).slice(-1)[0]
+        : trip.stages.filter((s) => s.order > 0)[0];
+    setDraft({
+      trip,
+      stageId: pointId && trip.stages.some((s) => s.id === pointId) ? pointId : fallbackStage?.id || "",
+      seats,
+      charter,
+      homePickup,
+      homeAddress: "",
+      useCredit: false,
+    });
     setSheetOpen(true);
   }
 
+  /* ─── Derived data (all hooks run before any early return) ──────────────── */
+
+  // Train pills from this direction's trips (unique MTM events)
+  const trainOptions = useMemo(() => {
+    const seen = new Map<string, { key: string; time: string; name: string; label: string }>();
+    for (const t of trips || []) {
+      if (!t.train) continue;
+      const key = `${t.train.name}-${t.train.mtmTime}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          key,
+          time: t.train.mtmTime,
+          name: t.train.name,
+          label: t.direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
+        });
+      }
+    }
+    return Array.from(seen.values());
+  }, [trips]);
+
+  const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
+
+  // Points grid grouped by route (coast), from the stable routes network
+  const pointGroups = useMemo(() => {
+    return routes
+      .map((r) => ({
+        route: r,
+        coast: coastOf(r.name),
+        points: r.stages.filter((s) => s.order > 0),
+      }))
+      .filter((g) => g.points.length > 0);
+  }, [routes]);
+
+  const selectedPoint = useMemo(() => {
+    for (const g of pointGroups) {
+      const p = g.points.find((s) => s.id === pointId);
+      if (p) return { point: p, route: g.route, coast: g.coast };
+    }
+    return null;
+  }, [pointGroups, pointId]);
+
+  // Trips after train + point filters
+  const visibleTrips = useMemo(() => {
+    let list = trips || [];
+    if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
+    if (pointId) list = list.filter((t) => t.stages.some((s) => s.id === pointId));
+    return list;
+  }, [trips, trainKey, pointId]);
+
+  // Live fare preview
+  const previewStage = selectedPoint?.point;
+  const farePreview = useMemo(() => {
+    const base = charter
+      ? selectedPoint?.route.charterPrice ?? 0
+      : (previewStage?.fare || 0) * seats;
+    const surcharge = homePickup
+      ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
+      : 0;
+    return { base, surcharge, total: base + surcharge };
+  }, [charter, previewStage, selectedPoint, seats, homePickup]);
+
+  /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
+
+  if (showSplash) {
+    return <SplashScreen onDone={() => setSplashDone(true)} />;
+  }
+
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader />
 
-      <main className="flex-1">
-        {/* Hero */}
-        <section className="border-b bg-gradient-to-b from-secondary/70 to-background">
-          <div className="mx-auto max-w-5xl px-4 py-10 sm:py-14">
-            <div className="max-w-2xl">
-              <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-900">
-                <TrainFront className="h-3.5 w-3.5" /> SGR feeder · timed to every Madaraka Express
-              </p>
-              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                Off the train, onto a cab that <span className="text-primary">actually shows up.</span>
-              </h1>
-              <p className="mt-3 text-muted-foreground sm:text-lg">
-                Mi-Reli shuttles you between Mombasa Terminus (MTM) and the coast — shared-ride
-                pickup points across the North Coast (Kiembeni, Bamburi, Nyali, Mtwapa, Malindi)
-                and the South Coast (Likoni, ShikaAdabu, Diani). Every cab is timed to a train
-                departure or arrival. Pay with M-Pesa; your fare is held safely until your ride
-                is delivered.
-              </p>
+      {/* Direction switcher — the signature pill row */}
+      <div className="mx-auto max-w-md w-full px-4 pt-3">
+        <Tabs value={direction} onValueChange={(v) => setDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="FROM_TERMINUS" className="flex items-center gap-1.5">
+              <Anchor className="h-3.5 w-3.5" /> From Terminus
+            </TabsTrigger>
+            <TabsTrigger value="TO_TERMINUS" className="flex items-center gap-1.5">
+              <Navigation className="h-3.5 w-3.5" /> To Terminus
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      <SiteNav />
+
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={direction}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="space-y-4"
+          >
+            {/* Date */}
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+                <CalendarDays className="h-3.5 w-3.5" />
+                {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
+              </div>
+              <DatePicker value={date} onChange={setDate} />
+              <div className="mt-1.5 text-xs text-muted-foreground">
+                Selected: <span className="font-medium text-foreground">{fmtDateShort(date)}</span>
+              </div>
             </div>
 
-            {/* Search */}
-            <Card className="mt-8">
-              <CardContent className="p-4 sm:p-5">
-                <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Direction</Label>
-                    <div className="grid grid-cols-2 gap-1 rounded-lg border p-1">
-                      <button
-                        onClick={() => switchDirection("FROM_TERMINUS")}
-                        className={`rounded-md px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
-                          direction === "FROM_TERMINUS" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        Train → drop-off
-                      </button>
-                      <button
-                        onClick={() => switchDirection("TO_TERMINUS")}
-                        className={`rounded-md px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
-                          direction === "TO_TERMINUS" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        Pickup → train
-                      </button>
+            {/* Train selector */}
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+                <TrainIcon className="h-3.5 w-3.5" />
+                {direction === "FROM_TERMINUS" ? "Arriving on which train?" : "Catching which train?"}
+              </div>
+              {trainOptions.length === 0 && !loading && (
+                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  No train-linked departures for this day — try another date.
+                </p>
+              )}
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                {trainOptions.map((t) => (
+                  <TrainPill
+                    key={t.key}
+                    time={t.time}
+                    label={t.label}
+                    active={trainKey === t.key}
+                    onClick={() => setTrainKey(trainKey === t.key ? null : t.key)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Point picker */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
+                </div>
+                {pointId && (
+                  <button onClick={() => setPointId(null)} className="text-[11px] text-primary hover:underline">
+                    Show all points
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {pointGroups.length === 0 && (
+                  <Skeleton className="h-20 w-full" />
+                )}
+                {pointGroups.map(({ route, coast, points }) => (
+                  <div key={route.id}>
+                    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                      {coast === "south" ? (
+                        <span className="inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[9px] uppercase text-orange-800">
+                          South Coast
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] uppercase text-emerald-800">
+                          North Coast
+                        </span>
+                      )}
+                      <span>{route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {points.map((p) => {
+                        const active = pointId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => setPointId(active ? null : p.id)}
+                            className={cn(
+                              "rounded-lg border p-2 text-left text-xs transition-all",
+                              active
+                                ? "border-primary bg-primary shadow-sm text-primary-foreground"
+                                : "border-border bg-card hover:bg-accent hover:text-accent-foreground",
+                            )}
+                          >
+                            <div className="truncate font-medium">{p.name}</div>
+                            <div className={cn("mt-0.5 text-[10px]", active ? "opacity-80" : "text-muted-foreground")}>
+                              KSh {p.fare} · door +{p.homeSurcharge}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="travel-date" className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <CalendarDays className="h-3.5 w-3.5" /> Travel date
+                ))}
+              </div>
+            </div>
+
+            {/* Options: door-to-door + charter + live fare preview */}
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-1.5 text-sm">
+                  <Car className="h-4 w-4" /> {pointLabelCap} options
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                {/* Door-to-door toggle */}
+                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+                  <div className="flex-1">
+                    <Label className="flex items-center gap-1 text-sm font-medium">
+                      <HomeIcon className="h-4 w-4" /> Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}
                     </Label>
-                    <Input
-                      id="travel-date"
-                      type="date"
-                      min={todayStr()}
-                      max={todayStr(2)}
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {selectedPoint
+                        ? `+${ksh(selectedPoint.point.homeSurcharge)}/seat — passes to your driver in full.`
+                        : "Pick a point first to see its door surcharge."}
+                    </p>
                   </div>
-                  <div className="flex items-end">
-                    <Button className="w-full sm:w-auto" onClick={() => loadTrips(direction, date)}>
-                      <Search className="h-4 w-4" /> Find rides
-                    </Button>
+                  <Switch checked={homePickup} onCheckedChange={setHomePickup} aria-label="Door-to-door" />
+                </div>
+
+                {/* Charter toggle */}
+                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+                  <div className="flex-1">
+                    <Label className="flex items-center gap-1 text-sm font-medium">
+                      <Crown className="h-4 w-4 text-violet-600" /> Book the whole vehicle (private)
+                    </Label>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Reserve the entire cab for your family or group — no other passengers join.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={charter}
+                    onCheckedChange={(c) => {
+                      setCharter(c);
+                      if (c) setHomePickup(false);
+                    }}
+                    aria-label="Charter"
+                  />
+                </div>
+
+                {/* Live fare preview */}
+                <div className="space-y-1.5 rounded-lg border bg-card p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Live fare preview</div>
+                  <div className="space-y-1 text-xs">
+                    <Row
+                      label={charter ? "Charter (whole cab)" : `Base (per seat${selectedPoint ? ` · ${selectedPoint.point.name}` : ""})`}
+                      value={selectedPoint || charter ? ksh(charter ? (selectedPoint?.route.charterPrice ?? 0) : (previewStage?.fare || 0)) : "—"}
+                    />
+                    {homePickup && selectedPoint && (
+                      <Row label={`Door-to-door surcharge${charter ? "" : ` × ${seats}`}`} value={`+${ksh(previewStage?.homeSurcharge || 0)}${charter ? "" : ` × ${seats}`}`} />
+                    )}
+                    {!charter && seats > 1 && selectedPoint && <Row label={`Seats × ${seats}`} value={`${ksh(previewStage?.fare || 0)} × ${seats}`} />}
+                  </div>
+                  <div className="flex items-center justify-between border-t pt-1.5">
+                    <span className="text-sm font-medium">
+                      Total {charter ? "(whole cab)" : seats > 1 ? `(${seats} seats)` : ""}
+                    </span>
+                    <span className="text-lg font-bold tabular-nums text-primary">
+                      {selectedPoint || charter ? ksh(farePreview.total) : "—"}
+                    </span>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </section>
 
-        {/* Results */}
-        <section className="mx-auto w-full max-w-5xl px-4 py-8">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">
-              {searched ? "Departures" : "Today's departures"}
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                {direction === "FROM_TERMINUS"
-                  ? "Mombasa Terminus (MTM) → your drop-off point"
-                  : "your pickup point → Mombasa Terminus (MTM)"}
-              </span>
-            </h2>
-          </div>
+            {/* Seats (pooled only) */}
+            {!charter && (
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+                  <Users className="h-3.5 w-3.5" /> How many seats?
+                </div>
+                <SeatStepper value={seats} onChange={setSeats} min={1} max={14} />
+              </div>
+            )}
 
-          {loading && (
-            <div className="grid gap-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-28 w-full" />
-              ))}
-            </div>
-          )}
+            {/* Available cabs */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">
+                  {charter ? "Available for charter" : "Available pooled cabs"}
+                </h3>
+                <span className="text-xs text-muted-foreground">{loading ? "…" : `${visibleTrips.length} cabs`}</span>
+              </div>
 
-          {!loading && trips && trips.length === 0 && (
-            <Card>
-              <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
-                <ArrowRightLeft className="h-8 w-8 text-muted-foreground" />
-                <p className="font-medium">No rides left for this day</p>
-                <p className="text-sm text-muted-foreground">
-                  Try another date — cabs run with every Madaraka Express departure and arrival
-                  at Mombasa Terminus, including the night train.
-                </p>
-              </CardContent>
-            </Card>
-          )}
+              {loading && (
+                <div className="space-y-2">
+                  <Skeleton className="h-36 w-full" />
+                  <Skeleton className="h-36 w-full" />
+                </div>
+              )}
 
-          {!loading && trips && trips.length > 0 && (
-            <div className="grid gap-3">
-              {trips.map((t) => (
-                <Card key={t.id} className="transition-shadow hover:shadow-md">
-                  <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-lg font-semibold">
-                          <Clock className="h-4 w-4 text-primary" /> {fmtTime(t.departureAt)}
-                        </span>
-                        <TripStatusBadge status={t.status} />
-                        {t.train && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
-                            <TrainFront className="h-3 w-3" />
-                            {t.direction === "FROM_TERMINUS"
-                              ? `Meets the ${t.train.name} · arrives MTM ${t.train.mtmTime}`
-                              : `Catches the ${t.train.name} · departs MTM ${t.train.mtmTime}`}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 truncate text-sm text-muted-foreground">
-                        {t.routeName}
-                        {t.direction === "TO_TERMINUS"
-                          ? ` · cab reaches the terminus ${fmtTime(t.terminusAt)}, ahead of the train`
-                          : ` · ${t.stages.filter((s) => s.order > 0).length} drop-off points`}
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        {t.driver && (
-                          <span className="inline-flex items-center gap-1">
-                            <Car className="h-3.5 w-3.5" /> {t.driver.cabType} · {t.driver.plate}
-                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {t.driver.rating.toFixed(1)}
-                          </span>
-                        )}
-                        <span>
-                          {t.seatsLeft > 0 ? `${t.seatsLeft} seats left` : "Full"}
-                          {t.status === "locked" ? " · lock passed — credits only" : ""}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end">
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-primary">{ksh(t.minFare)}+</p>
-                        <p className="text-xs text-muted-foreground">per seat · charter {ksh(t.charterPrice)}</p>
-                      </div>
-                      <Button
-                        onClick={() => book(t)}
-                        disabled={!t.bookable}
-                        size="sm"
-                        className="min-w-28"
-                      >
-                        {t.bookable ? "Book a seat" : t.status === "locked" ? "Locked" : "Unavailable"}
-                      </Button>
-                    </div>
+              {!loading && visibleTrips.length === 0 && (
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    {pointId
+                      ? "No cabs serve this point for that train. Try another point or \"Show all points\"."
+                      : "No cabs posted for this train yet."}
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          )}
-        </section>
+              )}
 
-        {/* Madaraka Express timetable — the trains every cab is timed to */}
-        {trains.length > 0 && (
-          <section className="border-t">
-            <div className="mx-auto max-w-5xl px-4 py-8">
-              <div className="flex items-center gap-2">
-                <TrainFront className="h-5 w-5 text-primary" />
-                <h2 className="text-lg font-semibold">The trains we meet — Madaraka Express</h2>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                MTM = Mombasa Terminus · NTM = Nairobi Terminus. Outbound cabs arrive at MTM
-                before each departure; return cabs leave MTM after each arrival.
-              </p>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="mb-2 text-sm font-semibold">Mombasa → Nairobi</p>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                        <th className="py-1.5 pr-3">Train</th>
-                        <th className="py-1.5 pr-3">Departs MTM</th>
-                        <th className="py-1.5">Arrives NTM</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trains
-                        .filter((tr) => tr.direction === "MBA_TO_NBO")
-                        .map((tr) => (
-                          <tr key={tr.id} className="border-b last:border-0">
-                            <td className="py-1.5 pr-3 font-medium">{tr.name}</td>
-                            <td className="py-1.5 pr-3">{tr.originTime}</td>
-                            <td className="py-1.5">
-                              {tr.destTime}
-                              {tr.destDayOffset > 0 ? " (+1 day)" : ""}
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="mb-2 text-sm font-semibold">Nairobi → Mombasa</p>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                        <th className="py-1.5 pr-3">Train</th>
-                        <th className="py-1.5 pr-3">Departs NTM</th>
-                        <th className="py-1.5">Arrives MTM</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trains
-                        .filter((tr) => tr.direction === "NBO_TO_MBA")
-                        .map((tr) => (
-                          <tr key={tr.id} className="border-b last:border-0">
-                            <td className="py-1.5 pr-3 font-medium">{tr.name}</td>
-                            <td className="py-1.5 pr-3">{tr.originTime}</td>
-                            <td className="py-1.5">
-                              {tr.destTime}
-                              {tr.destDayOffset > 0 ? " (+1 day)" : ""}
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {!loading &&
+                visibleTrips.map((trip) => (
+                  <motion.div key={trip.id} layout whileTap={{ scale: 0.99 }}>
+                    <CabCard
+                      trip={trip}
+                      pointName={selectedPoint?.point.name}
+                      pointFare={selectedPoint?.point.fare}
+                      seats={seats}
+                      charter={charter}
+                      onBook={() => openBooking(trip)}
+                    />
+                  </motion.div>
+                ))}
             </div>
-          </section>
-        )}
 
-        {/* Trust / how money works */}
-        <section className="border-t bg-muted/30">
-          <div className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-3">
-            <div className="flex gap-3">
-              <Banknote className="h-6 w-6 shrink-0 text-primary" />
-              <div>
-                <p className="font-semibold">M-Pesa, held safely</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Your fare goes to the Mi-Reli M-Pesa account — never straight to a driver. Every
-                  shilling is tracked in the platform ledger until your ride is delivered.
+            {/* How it works */}
+            <Card className="border-dashed">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-1.5 text-xs">
+                  <Info className="h-3.5 w-3.5" /> How points &amp; fares work
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1.5 pt-0 text-xs text-muted-foreground">
+                <p>
+                  Cabs meet every Madaraka Express at Mombasa Terminus. {direction === "FROM_TERMINUS" ? "Choose your drop-off point — the cab drops you there on the way from the terminus." : "Choose your pickup point and be there 10 minutes before the cab leaves for the terminus."}
                 </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <ShieldCheck className="h-6 w-6 shrink-0 text-primary" />
-              <div>
-                <p className="font-semibold">Cancel with confidence</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Cancel early for a full refund. Late but gave notice? Your fare becomes travel
-                  credit — valid 30 days, never lost.
+                <p>
+                  Shared-ride fare is <span className="font-medium text-foreground">KSh 400</span> per seat upcountry (Malindi 700, Diani Naivas 500). Door-to-door adds the point&apos;s surcharge, which goes to your driver in full.
                 </p>
+                <p>Private charter = the whole cab. Cancel before lock for a full refund; after lock, fares become 30-day travel credit.</p>
+              </CardContent>
+            </Card>
+
+            {/* My bookings */}
+            {myBookings.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-medium">
+                  <TicketIcon className="h-4 w-4" /> My bookings
+                </h3>
+                {myBookings.map((b) => (
+                  <Card key={b.id} className={cn(b.isCharter && "border-violet-300 bg-violet-50/30", b.status === "awaiting_payment" && "border-amber-300 bg-amber-50/30")}>
+                    <CardContent className="flex items-center justify-between gap-3 p-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                          <span>{b.stageName ?? b.code}</span>
+                          {b.isCharter && <CharterBadge />}
+                          <DotBadge status={b.status} />
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {b.departureAt ? fmtTime(b.departureAt) : "awaiting allocation"}
+                          {b.driver ? ` · ${b.driver.name} · ${b.driver.plate}` : ""}
+                        </div>
+                        <div className="mt-0.5 text-xs font-medium">
+                          {ksh(b.cashDue)}
+                          {b.status === "awaiting_payment" && <span className="font-normal text-muted-foreground"> by M-Pesa</span>}
+                        </div>
+                      </div>
+                      {b.status === "awaiting_payment" ? (
+                        <Button size="sm" className="h-8 shrink-0" onClick={() => setPayFor(b)}>
+                          Pay now
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={() => router.push("/bookings")}>
+                          Manage
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-            </div>
-            <div className="flex gap-3">
-              <MapPinCheck className="h-6 w-6 shrink-0 text-primary" />
-              <div>
-                <p className="font-semibold">Pickup &amp; drop-off points</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Share the ride from any of 22 coast points — Kiembeni to Mtwapa and Malindi up
-                  north, Likoni to Diani down south. Returning by train? Choose your drop-off
-                  point when you book.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       <SiteFooter />
@@ -373,10 +524,130 @@ export default function Home() {
         onClose={() => {
           setSheetOpen(false);
           loadTrips(direction, date);
+          loadMyBookings();
         }}
-        trip={selected}
-        onBooked={() => loadTrips(direction, date)}
+        draft={draft}
+        onBooked={() => {
+          loadTrips(direction, date);
+          loadMyBookings();
+        }}
       />
+
+      {payFor && (
+        <PaySheet
+          open={!!payFor}
+          onClose={() => {
+            setPayFor(null);
+            loadMyBookings();
+          }}
+          booking={{
+            id: payFor.id,
+            code: payFor.code,
+            cashDue: payFor.cashDue,
+            stageName: payFor.stageName,
+            departureAt: payFor.departureAt,
+          }}
+          onPaid={loadMyBookings}
+        />
+      )}
     </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function CabCard({
+  trip,
+  pointName,
+  pointFare,
+  seats,
+  charter,
+  onBook,
+}: {
+  trip: BookableTrip;
+  pointName?: string;
+  pointFare?: number;
+  seats: number;
+  charter: boolean;
+  onBook: () => void;
+}) {
+  const booked = trip.capacity - trip.seatsLeft;
+  const fare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+  const full = trip.seatsLeft <= 0 || !trip.bookable;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="space-y-2.5 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
+              <DotBadge status={trip.status} />
+              {trip.status === "locked" && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+                  <Sparkles className="h-2.5 w-2.5" /> credits only
+                </span>
+              )}
+            </div>
+            {trip.driver && (
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{trip.driver.name}</span>
+                <Stars rating={trip.driver.rating} />
+                <span className="text-muted-foreground/50">•</span>
+                <span className="font-mono">{trip.driver.plate}</span>
+              </div>
+            )}
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Clock className="h-3 w-3" /> Cab departs {fmtTime(trip.departureAt)}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
+            </div>
+            <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
+            {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
+              <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+            {trip.train && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                <TrainIcon className="h-3 w-3" />
+                {trip.direction === "FROM_TERMINUS"
+                  ? `Meets the ${trip.train.name} · MTM ${trip.train.mtmTime}`
+                  : `Catches the ${trip.train.name} · MTM ${trip.train.mtmTime}`}
+              </span>
+            )}
+            {trip.direction === "TO_TERMINUS" && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Navigation className="h-3 w-3" /> reaches MTM {fmtTime(trip.terminusAt)}
+              </span>
+            )}
+          </div>
+          <SeatMeter booked={booked} capacity={trip.capacity} />
+        </div>
+
+        <Button className="h-9 w-full" size="sm" disabled={full} onClick={onBook}>
+          {full
+            ? trip.seatsLeft <= 0
+              ? "Not enough seats"
+              : "Unavailable"
+            : charter
+              ? `Book charter · ${ksh(trip.charterPrice)}`
+              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

@@ -2,13 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Logo } from "@/components/logo";
+import { motion } from "framer-motion";
+import { LogoTile } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/client";
-import { ArrowLeft, KeyRound, Loader2, MailCheck, ShieldAlert } from "lucide-react";
+import { ArrowRight, KeyRound, Lock, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -22,7 +23,7 @@ export default function AdminLoginPage() {
   // Already signed in? straight to the console.
   useEffect(() => {
     api("/api/admin/overview").then(() => router.replace("/admin")).catch(() => {});
-  }, []);
+  }, [router]);
 
   async function requestOtp() {
     setBusy(true);
@@ -51,19 +52,30 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-primary px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="items-center text-center">
-          <Logo size="lg" />
-          <CardTitle className="mt-2">Ops console</CardTitle>
-          <CardDescription>Restricted — oversight access only</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {step === "email" && (
+    <div className="flex min-h-screen flex-col bg-background">
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+        >
+          <LogoTile size="lg" />
+        </motion.div>
+        <h1 className="mb-1 mt-4 text-2xl font-bold tracking-tight">Mi-Reli</h1>
+        <p className="mb-8 text-sm text-muted-foreground">Admin Console · oversight only</p>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-4">
+          {step === "email" ? (
             <>
+              <div className="mb-2 text-center">
+                <h2 className="text-lg font-semibold">Restricted access</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Sign in with your admin email — non-admin emails are rejected here.
+                </p>
+              </div>
               <div className="space-y-2">
-                <Label htmlFor="admin-email" className="flex items-center gap-1.5">
-                  <MailCheck className="h-4 w-4 text-primary" /> Work email
+                <Label className="flex items-center gap-1 text-xs">
+                  <Mail className="h-3 w-3" /> Work email
                 </Label>
                 <Input
                   id="admin-email"
@@ -72,64 +84,95 @@ export default function AdminLoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && email && requestOtp()}
+                  className="h-11"
+                  autoFocus
+                  disabled={busy}
                 />
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="w-full" onClick={requestOtp} disabled={busy || !email}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue"}
+              {error && <p className="text-xs text-destructive">{error}</p>}
+              <Button className="h-11 w-full" onClick={requestOtp} disabled={busy || !email}>
+                Continue <ArrowRight className="ml-1 h-4 w-4" />
               </Button>
             </>
-          )}
-
-          {step === "verify" && (
+          ) : (
             <>
+              <div className="mb-2 text-center">
+                <h2 className="text-lg font-semibold">Verify</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Enter the code sent to {email}</p>
+              </div>
+
               <div className="space-y-2">
-                <Label htmlFor="admin-otp">Verification code sent to {email}</Label>
+                <Label className="text-xs">Verification code</Label>
                 <Input
-                  id="admin-otp"
                   inputMode="numeric"
                   maxLength={4}
-                  placeholder="• • • •"
-                  className="text-center text-2xl tracking-[0.5em]"
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="••••"
+                  className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
+                  autoFocus
+                  disabled={busy}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="admin-2fa" className="flex items-center gap-1.5">
-                  <KeyRound className="h-4 w-4 text-primary" /> Admin access code (2nd factor)
+
+              {/* Admin 2FA — second factor, original style box */}
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3"
+              >
+                <Label className="flex items-center gap-1 text-xs text-primary">
+                  <Lock className="h-3 w-3" /> Admin verification (2FA)
                 </Label>
                 <Input
-                  id="admin-2fa"
                   type="password"
-                  placeholder="Access code"
                   value={twofa}
                   onChange={(e) => setTwofa(e.target.value)}
+                  placeholder="Enter admin access code"
+                  className="h-11"
                   onKeyDown={(e) => e.key === "Enter" && verify()}
                 />
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="w-full" onClick={verify} disabled={busy || code.length !== 4 || !twofa}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Unlock console"}
+                <p className="text-[10px] text-muted-foreground">
+                  Admin accounts require a second verification code. In production, this would be a
+                  TOTP code from your authenticator app.
+                </p>
+              </motion.div>
+
+              {error && <p className="text-xs text-destructive">{error}</p>}
+              <Button className="h-11 w-full" onClick={verify} disabled={busy || code.length !== 4 || !twofa}>
+                Verify &amp; unlock console <KeyRound className="ml-1 h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="sm" className="w-full" onClick={() => setStep("email")}>
-                <ArrowLeft className="h-4 w-4" /> Start over
-              </Button>
-              <p className="rounded-md bg-muted p-2 text-center text-xs text-muted-foreground">
-                Prototype: any 4-digit code works · access code is set in Config
+              <button
+                onClick={() => setStep("email")}
+                className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+              >
+                ← Use a different email
+              </button>
+              <p className="text-center text-[10px] text-muted-foreground">
+                Demo: any 4-digit code works · access code is set in Config
               </p>
             </>
           )}
+        </motion.div>
 
-          <div className="flex items-start gap-2 border-t pt-3 text-xs text-muted-foreground">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <p>
-              Admin access is granted by identity, not by a button — non-admin emails are rejected
-              here, and every sign-in attempt is audit-logged.
-            </p>
+        {/* Trust indicators */}
+        <div className="mt-8 w-full max-w-sm space-y-2">
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <span>Admin access is granted by identity — never by a button on the passenger site.</span>
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <span>Every sign-in attempt and admin action is audit-logged.</span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-accent" />
+            <span>The engine runs the money — admins touch config, disputes and spot-checks only.</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
     </div>
   );
 }

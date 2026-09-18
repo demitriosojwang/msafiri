@@ -55,15 +55,15 @@ export default function AdminReconciliation() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold">Reconciliation</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Reconciliation</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           Daraja callbacks can be missed — the nightly sweep queries the Transaction Status API for
           anything ambiguous, so a lost webhook never silently loses a passenger&apos;s paid seat or a
           driver&apos;s payout. Last sweep: {data?.lastReconciliationAt ? fmtDateTime(data.lastReconciliationAt) : "never"}.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2">
         <StatCard label="Ambiguous payments" value={String(data?.counts.ambiguous || 0)} tone={(data?.counts.ambiguous || 0) > 0 ? "warn" : "good"} sub="awaiting status query" />
         <StatCard label="Pending refunds" value={String(data?.counts.pendingRefunds || 0)} sub={`${data?.counts.stuckRefunds || 0} flagged stuck`} tone={(data?.counts.stuckRefunds || 0) > 0 ? "bad" : "default"} />
         <StatCard label="Failed payouts" value={String(data?.counts.failedPayouts || 0)} tone={(data?.counts.failedPayouts || 0) > 0 ? "bad" : "good"} />

@@ -100,8 +100,8 @@ export default function AdminBookings() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Bookings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight">Bookings</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
           Every booking with its allocation and ledger state. Cancellations you trigger here are
           always fully refunded — the passenger is never at fault when the platform cancels.
         </p>

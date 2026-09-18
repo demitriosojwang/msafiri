@@ -103,8 +103,8 @@ export default function AdminDrivers() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Drivers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight">Drivers</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Everything driver-related lives here: roster, vehicles, M-Pesa payout numbers and
             per-driver earnings. Drivers have no UI in Mi-Reli — the driver app is a separate build
             that consumes the same records.
@@ -137,7 +137,7 @@ export default function AdminDrivers() {
                     {d.completedTrips} completed trips · rating {d.rating.toFixed(1)}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-right text-sm sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-right text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">Queued</p>
                     <p className="font-semibold text-amber-700">{ksh(d.earnings.queued)}</p>

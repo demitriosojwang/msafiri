@@ -3,12 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/client";
+import { LogoTile } from "@/components/site-chrome";
 import {
   AlertTriangle,
-  Banknote,
   BarChart3,
   CalendarCog,
   Car,
@@ -16,22 +15,23 @@ import {
   Coins,
   Radar,
   Receipt,
-  Settings,
   Users,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/admin", label: "Overview", icon: BarChart3 },
   { href: "/admin/bookings", label: "Bookings", icon: ClipboardList },
-  { href: "/admin/trips", label: "Trips & Allocation", icon: Car },
+  { href: "/admin/trips", label: "Trips", icon: Car },
   { href: "/admin/drivers", label: "Drivers", icon: Users },
-  { href: "/admin/money", label: "Money & Ledger", icon: Coins },
-  { href: "/admin/reconciliation", label: "Reconciliation", icon: Radar },
-  { href: "/admin/config", label: "Config", icon: Settings },
-  { href: "/admin/audit", label: "Audit log", icon: Receipt },
+  { href: "/admin/money", label: "Ledger", icon: Coins },
+  { href: "/admin/reconciliation", label: "Recon", icon: Radar },
+  { href: "/admin/config", label: "Config", icon: CalendarCog },
+  { href: "/admin/audit", label: "Audit", icon: Receipt },
 ];
 
-export function AdminNav({ adminName, adminEmail }: { adminName: string; adminEmail: string }) {
+/** Original-style admin chrome: app header ("Admin Console") + pill tab nav. */
+export function AdminChrome({ adminName, adminEmail }: { adminName: string; adminEmail: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -47,45 +47,78 @@ export function AdminNav({ adminName, adminEmail }: { adminName: string; adminEm
   }
 
   return (
-    <aside className="flex w-full flex-col border-r bg-primary text-primary-foreground lg:fixed lg:inset-y-0 lg:w-64">
-      <div className="flex items-center justify-between px-4 py-4 lg:block">
-        <Link href="/admin" aria-label="Mi-Reli admin">
-          <Logo light size="sm" />
-        </Link>
-        <p className="mt-1 hidden text-xs text-primary-foreground/70 lg:block">Ops oversight console</p>
-      </div>
-      <nav className="flex gap-1 overflow-x-auto px-2 pb-2 lg:mt-2 lg:flex-1 lg:flex-col lg:overflow-y-auto" aria-label="Admin">
-        {NAV.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                active
-                  ? "bg-primary-foreground/15 text-primary-foreground"
-                  : "text-primary-foreground/75 hover:bg-primary-foreground/10 hover:text-primary-foreground"
-              }`}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
+    <>
+      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
+        <div className="mx-auto flex max-w-md items-center justify-between px-4 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <Link href="/admin" aria-label="Mi-Reli admin">
+              <LogoTile />
             </Link>
-          );
-        })}
-      </nav>
-      <div className="hidden border-t border-primary-foreground/15 px-4 py-3 lg:block">
-        <p className="text-sm font-medium">{adminName}</p>
-        <p className="truncate text-xs text-primary-foreground/60">{adminEmail}</p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 text-primary-foreground/75 hover:bg-primary-foreground/10 hover:text-primary-foreground"
-          onClick={logout}
-          disabled={busy}
-        >
-          Sign out
-        </Button>
+            <div className="leading-tight">
+              <div className="text-base font-bold tracking-tight text-foreground">Mi-Reli</div>
+              <div className="-mt-0.5 flex items-center gap-1 text-[10px] tracking-wide text-muted-foreground">
+                <AlertTriangle className="h-2.5 w-2.5 text-accent" /> Admin Console · oversight only
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={logout} disabled={busy} className="text-[10px] text-muted-foreground hover:text-foreground">
+              Logout
+            </button>
+          </div>
+        </div>
+
+        {/* Pill tab nav — horizontally scrollable, original text-[10px] style */}
+        <div className="mx-auto max-w-md px-4 pb-2.5">
+          <div className="flex gap-1 overflow-x-auto rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {NAV.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold transition-all duration-200",
+                    active
+                      ? "mireli-pill-active"
+                      : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
+                  )}
+                >
+                  <item.icon className="h-3 w-3" /> {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </header>
+
+      {/* Account strip */}
+      <div className="mx-auto w-full max-w-md px-4 pt-3">
+        <p className="text-[10px] text-muted-foreground">
+          Signed in as <span className="font-medium text-foreground">{adminName}</span> · {adminEmail}
+        </p>
       </div>
-    </aside>
+    </>
+  );
+}
+
+export function AdminSignOutButton() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+
+  async function logout() {
+    setBusy(true);
+    try {
+      await api("/api/admin/auth", { body: { step: "logout" } });
+      router.push("/admin/login");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button variant="ghost" size="sm" onClick={logout} disabled={busy}>
+      Sign out
+    </Button>
   );
 }
