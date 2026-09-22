@@ -89,26 +89,44 @@ export function Stars({ rating }: { rating: number }) {
   );
 }
 
-/* ─── Train pill — big time, small label (train selector) ──────────────────── */
+/* ─── Train pill — big time, service name (train selector) ─────────────────── */
 
-export function TrainPill({ time, label, active, onClick }: {
+export function TrainPill({ time, label, name, active, gone, onClick }: {
   time: string;
   label: string;
+  name?: string;
   active: boolean;
+  gone?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
-      onClick={onClick}
+      onClick={gone ? undefined : onClick}
+      disabled={gone}
+      aria-disabled={gone || undefined}
       className={cn(
         "min-w-[110px] flex-1 rounded-2xl border px-3.5 py-2.5 text-left transition-all duration-200",
-        active ? "mireli-pill-active" : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
+        gone
+          ? "cursor-not-allowed border-stone-200 bg-stone-100 text-stone-500"
+          : active
+            ? "mireli-pill-active"
+            : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
       )}
     >
-      <div className={cn("text-[9px] font-medium uppercase tracking-wider", active ? "opacity-80" : "text-muted-foreground")}>
+      <div className={cn("text-[9px] font-medium uppercase tracking-wider", active && !gone ? "opacity-80" : gone ? "text-stone-400" : "text-muted-foreground")}>
         {label}
       </div>
-      <div className="mt-0.5 text-xl font-bold leading-tight tabular-nums">{time}</div>
+      <div className={cn("mt-0.5 text-xl font-bold leading-tight tabular-nums", gone && "text-stone-400")}>{time}</div>
+      <div className={cn("mt-0.5 flex items-center gap-1 truncate text-[10px] font-semibold", active && !gone ? "opacity-90" : gone ? "text-stone-500" : "text-muted-foreground")}>
+        {gone ? (
+          <>
+            <span className="h-1 w-1 shrink-0 rounded-full bg-stone-400" />
+            Cab departed
+          </>
+        ) : (
+          name || ""
+        )}
+      </div>
     </button>
   );
 }

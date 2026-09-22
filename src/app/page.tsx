@@ -61,6 +61,14 @@ interface BookingRow {
   driver: { name: string; plate: string } | null;
 }
 
+interface TrainRow {
+  id: string;
+  name: string;
+  direction: "MBA_TO_NBO" | "NBO_TO_MBA";
+  originTime: string;
+  destTime: string;
+}
+
 function coastOf(routeName: string): "north" | "south" {
   return routeName.toLowerCase().includes("south") ? "south" : "north";
 }
@@ -80,6 +88,7 @@ export default function Home() {
   });
   const [routes, setRoutes] = useState<RouteInfo[]>([]);
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
+  const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -121,6 +130,9 @@ export default function Home() {
     api<{ routes: RouteInfo[] }>("/api/routes")
       .then((r) => setRoutes(r.routes))
       .catch(() => {});
+    api<{ trains: TrainRow[] }>("/api/trains")
+      .then((r) => setTimetable(r.trains))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -151,23 +163,28 @@ export default function Home() {
 
   /* ─── Derived data (all hooks run before any early return) ──────────────── */
 
-  // Train pills from this direction's trips (unique MTM events)
+  // Train pills — always the full Madaraka timetable for this direction
+  // (08:00 Inter-County · 15:00 Express · 22:00 Night Train), each marked
+  // "gone" when its meet-cab for the selected day has already left.
   const trainOptions = useMemo(() => {
-    const seen = new Map<string, { key: string; time: string; name: string; label: string }>();
-    for (const t of trips || []) {
-      if (!t.train) continue;
-      const key = `${t.train.name}-${t.train.mtmTime}`;
-      if (!seen.has(key)) {
-        seen.set(key, {
+    const wantDir = direction === "FROM_TERMINUS" ? "NBO_TO_MBA" : "MBA_TO_NBO";
+    return timetable
+      .filter((t) => t.direction === wantDir)
+      .map((t) => {
+        const mtmTime = t.direction === "MBA_TO_NBO" ? t.originTime : t.destTime;
+        const key = `${t.name}-${mtmTime}`;
+        return {
           key,
-          time: t.train.mtmTime,
-          name: t.train.name,
-          label: t.direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
-        });
-      }
-    }
-    return Array.from(seen.values());
-  }, [trips]);
+          time: mtmTime,
+          name: t.name,
+          label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
+          gone: trips !== null && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
+        };
+      })
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [timetable, direction, trips]);
+
+  const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
 
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
@@ -222,7 +239,10 @@ export default function Home() {
 
       {/* Direction switcher — the signature pill row */}
       <div className="mx-auto max-w-md w-full px-4 pt-3">
-        <Tabs value={direction} onValueChange={(v) => setDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
+        <Tabs value={direction} onValueChange={(v) => {
+          setDirection(v as "FROM_TERMINUS" | "TO_TERMINUS");
+          setTrainKey(null);
+        }}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="FROM_TERMINUS" className="flex items-center gap-1.5">
               <Anchor className="h-3.5 w-3.5" /> From Terminus
@@ -265,7 +285,7 @@ export default function Home() {
               </div>
               {trainOptions.length === 0 && !loading && (
                 <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                  No train-linked departures for this day — try another date.
+                  Timetable unavailable right now — cabs run to the Madaraka Express schedule (08:00 Inter-County · 15:00 Express · 22:00 Night Train).
                 </p>
               )}
               <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
@@ -274,6 +294,8 @@ export default function Home() {
                     key={t.key}
                     time={t.time}
                     label={t.label}
+                    name={t.name}
+                    gone={t.gone}
                     active={trainKey === t.key}
                     onClick={() => setTrainKey(trainKey === t.key ? null : t.key)}
                   />
@@ -435,9 +457,11 @@ export default function Home() {
               {!loading && visibleTrips.length === 0 && (
                 <Card>
                   <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    {pointId
-                      ? "No cabs serve this point for that train. Try another point or \"Show all points\"."
-                      : "No cabs posted for this train yet."}
+                    {selectedTrainGone
+                      ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
+                      : pointId
+                        ? "No cabs serve this point for that train. Try another point or \"Show all points\"."
+                        : "No cabs posted for this train yet."}
                   </CardContent>
                 </Card>
               )}

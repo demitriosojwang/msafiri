@@ -85,3 +85,20 @@ Work Log:
 Stage Summary:
 - The passenger site is now auth-free: zero OTP walls, zero sign-in prompts; identity is an invisible server-side guest session that still gives every visitor the full money story (welcome credit, partial redemption, ledger-held fares).
 - Admin oversight console remains the only gated surface, exactly as the user specified.
+
+---
+Task ID: 5
+Agent: Super Z (main agent)
+Task: Restore the missing 08:00 morning train on the booking screen and label every train pill with its service name (Inter-County / Express / Night Train) — per the user's official MADARAKA-EXPRESS timetable screenshot (upload/Screenshot (187).png).
+
+Work Log:
+- Root cause: train pills were derived from bookable trips only; ensureTrips skips stale slots (>30 min past), so today's 08:00-departure meet-cabs (cab ~05:00/05:30) and the 03:55 night-arrival cabs (cab 04:40) never existed by afternoon — the pills vanished instead of showing as gone.
+- DB verified against the PDF: all 6 services correct (MBA_TO_NBO Inter-County 08:00→NTM 14:10, Express 15:00→20:18, Night 22:00→03:55+1d; NBO_TO_MBA Inter-County 08:00→MTM 14:00, Express 15:00→20:30, Night 22:00→03:55+1d). No data changes needed.
+- TrainPill (shared.tsx): new name + gone props — service name under the big time; gone renders a solid stone-100 disabled pill ("Cab departed" + dot) after fixing a translucent bg-muted/40 bug that picked up the body's warm coastal gradient and looked yellow/highlighted.
+- page.tsx: pills now built from the authoritative /api/trains timetable per direction (FROM→NBO_TO_MBA arrivals at destTime, TO→MBA_TO_NBO departures at originTime), sorted by MTM time; gone = no matching trip on the selected date (only judged after trips load); trainKey auto-cleared on direction switch; new empty-state copy for a gone selected train; timetable-fallback note lists 08:00/15:00/22:00.
+- Verified in browser 414×896: today TO shows 08:00 "Cab departed" muted + 15:00 Express + 22:00 Night Train; tomorrow TO shows all three bookable with names, selecting 08:00 Inter-County lists 2 cabs (South Coast 05:00 Amiani Otieno KDB 820M / North Coast 05:30 Mwangi Karuki KDA 471X) with "Catches the Inter-County · MTM 08:00" chips and "reaches MTM 07:00"; FROM tomorrow shows 03:55 Night Train / 14:00 Inter-County / 20:30 Express all clickable; zero page errors; dev.log clean; tsc + eslint clean.
+- Screenshots: upload/train-01…train-06.
+
+Stage Summary:
+- The full Madaraka Express schedule (3 departures + 3 arrivals, correctly named) is now always visible on the booking screen for any date; already-run cabs show an honest muted "Cab departed" state instead of disappearing, while future dates expose the early-morning 08:00-train cabs for booking.
+- Cab cards, booking sheet and admin already carried train names — passenger surface now names the train everywhere a time is shown.
