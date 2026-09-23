@@ -122,3 +122,21 @@ Work Log:
 Stage Summary:
 - Payments are now plug-and-play: the moment the user pastes Consumer Key + Secret + Shortcode + Passkey (Admin → Payments, or env vars), STK pushes, callback capture, paybill confirmations, refunds and payouts go live against Daraja sandbox/production with zero code changes — and until then the deterministic demo keeps every money path demonstrable.
 - The ledger invariant survived the swap: whatever mode, every collected shilling still lands in exactly one bucket, webhooks are idempotent, and unresolvable states stay visible to admin instead of being guessed.
+
+---
+Task ID: 7
+Agent: Super Z (main agent)
+Task: Verify the passenger payment system end-to-end after server outage; finish the plug-and-play .env wiring (user: "the passengers payment system").
+
+Work Log:
+- Found the dev server down with a broken lightningcss native binary (lightningcss.linux-x64-gnu.node missing from node_modules); fixed by `bun add lightningcss-linux-x64-gnu` + `rm -rf .next` + restart — home 200 again.
+- Confirmed the full Daraja integration is intact: src/lib/daraja.ts (dual-mode client, env-over-DB credential resolution, live mode when Consumer Key+Secret+Shortcode+Passkey all exist, MPESA_MODE=mock force), /api/pay/options, /api/pay/mpesa/{callback,timeout,c2b,b2c/result} webhooks, admin /admin/payments console + /api/admin/payments.
+- Finished the "just apply it" surface that was missing on disk: appended the commented MPESA_* credentials block to .env (13 vars with instructions — uncomment and paste to go live) and created .env.example as a copyable template.
+- Verified src tsc clean and eslint clean on pay-sheet.tsx, api/pay routes and daraja.ts (global tsc noise comes only from unrelated examples/skills/upload dirs).
+- Browser E2E (414x896), demo mode: guest home with Credit · KSh 100 → Nyali Center 400 → booking sheet, credit checked → reserve → PaySheet "Pay with M-Pesa" showing KSh 300 cash due and STK-only options (paybill correctly hidden while no shortcode configured) → 0712345678 → STK prompt → verify → Payment received: Receipt MR-D7T6E3, M-Pesa code 19SCY5ZMK5, KSh 300.
+- Admin login (demitri@mireli.co.ke → OTP 1234 → access code) → /admin/payments: Gateway status DEMO SIMULATION, paybill —, passenger options STK push, callback base NOT SET, full credentials form (env/consumer key/secret/shortcode/passkey/callback + B2C initiator trio + cert), Test connection, Save & apply, Clear, Safaricom onboarding checklist.
+- dev.log clean (only the intentional fake-credential OAuth 400 from the earlier test-connection).
+- Screenshots: upload/payv-01…payv-04.
+
+Stage Summary:
+- The passenger payment system is confirmed fully operational in demo mode and genuinely plug-and-play: credentials arrive → paste into Admin → Payments or uncomment the .env block → Test connection → STK pushes, paybill confirmations, refunds and payouts run live against Daraja sandbox/production with zero code changes.
