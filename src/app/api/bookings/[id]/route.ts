@@ -82,7 +82,19 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, checkoutRequestId: live.checkoutRequestId, amount: live.amount, phone: live.phone, reused: true });
     }
 
-    const push = daraja.stkPush(phone, booking.cashDue, booking.code);
+    const push = await daraja.stkPush(phone, booking.cashDue, booking.code);
+    if (!push.ok || !push.checkoutRequestId) {
+      await audit({
+        actorId: session.id,
+        actorName: session.name,
+        actorRole: "passenger",
+        action: "payment.push_rejected",
+        entity: "booking",
+        entityId: booking.id,
+        metadata: { code: booking.code, amount: booking.cashDue, phone, responseCode: push.responseCode, desc: push.responseDescription },
+      });
+      return NextResponse.json({ error: push.responseDescription || "M-Pesa rejected the payment request" }, { status: 400 });
+    }
     const tx = await db.mpesaTransaction.create({
       data: {
         bookingId: booking.id,
@@ -105,20 +117,63 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: true, checkoutRequestId: tx.checkoutRequestId, amount: booking.cashDue, phone });
   }
 
-  // ── Verify: the customer acted on the prompt → result callback ───────────
+  // ── Verify: the customer acted on the prompt → poll the result ────────────
+  // Live mode polls Daraja's stkpushquery; demo mode auto-confirms. With no
+  // pending push (Paybill path) the demo simulates the C2B confirmation,
+  // live mode waits for the real C2B webhook to land.
   if (action === "verify") {
     const tx = await db.mpesaTransaction.findFirst({
       where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending"] } },
       orderBy: { createdAt: "desc" },
     });
     if (!tx) {
-      // Maybe already confirmed (sweep got there first)
+      // Maybe already confirmed (sweep or webhook got there first)
       if (booking.status === "confirmed" && booking.ledgerEntry) {
         return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt });
       }
-      return NextResponse.json({ error: "No M-Pesa prompt is active — send one first" }, { status: 400 });
+      const creds = await daraja.resolveDaraja();
+      if (creds.mode === "mock") {
+        const receipt = daraja.generateMpesaReceipt();
+        await db.mpesaTransaction.create({
+          data: {
+            bookingId: booking.id,
+            phone: "paybill",
+            amount: booking.cashDue,
+            checkoutRequestId: daraja.generateCheckoutRequestId(),
+            merchantRequestId: daraja.generateMerchantRequestId(),
+            status: "confirmed",
+            resultCode: daraja.RESULT_CODES.SUCCESS,
+            resultDesc: "Paybill payment confirmed (demo simulation)",
+            mpesaReceipt: receipt,
+            confirmedAt: new Date(),
+          },
+        });
+        await confirmBookingPayment(booking.id, { receipt, checkoutRequestId: `pb-${booking.code}` });
+        return NextResponse.json({ ok: true, receipt, amount: booking.cashDue });
+      }
+      return NextResponse.json(
+        { error: "We can't see your payment yet — it usually lands within a minute. Try again shortly." },
+        { status: 409 },
+      );
     }
-    const result = daraja.confirmStkCallback();
+    const result = await daraja.queryStkResult(tx.checkoutRequestId);
+    if (result.pending) {
+      return NextResponse.json(
+        { error: "Payment not completed yet — check your phone and try again in a moment." },
+        { status: 409 },
+      );
+    }
+    if (result.resultCode !== daraja.RESULT_CODES.SUCCESS || !result.mpesaReceipt) {
+      await db.mpesaTransaction.update({
+        where: { id: tx.id },
+        data: {
+          status: "failed",
+          resultCode: result.resultCode || daraja.RESULT_CODES.CANCELLED,
+          resultDesc: result.resultDesc,
+        },
+      });
+      return NextResponse.json({ error: result.resultDesc || "The M-Pesa prompt was not completed" }, { status: 402 });
+    }
     await db.mpesaTransaction.update({
       where: { id: tx.id },
       data: {

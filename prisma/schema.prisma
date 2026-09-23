@@ -244,6 +244,24 @@ model PlatformConfig {
   bookingWindowMinutes       Int       @default(15) // min minutes before departure to book
   terminusArrivalBufferMinutes Int     @default(60) // TO_TERMINUS cabs reach MTM this early before train departure
   trainMeetBufferMinutes     Int       @default(45) // FROM_TERMINUS cabs leave MTM this long after train arrival
+  // ─── M-Pesa Daraja credentials ────────────────────────────────────────────
+  // Environment variables with the same names take precedence when present.
+  // Until consumer key + secret + shortcode + passkey exist (env or here),
+  // every Daraja call runs the deterministic demo simulator.
+  mpesaEnvironment           String    @default("sandbox") // sandbox | production
+  mpesaConsumerKey           String    @default("")
+  mpesaConsumerSecret        String    @default("")
+  mpesaShortcode             String    @default("") // collection shortcode — fares land here (also shown as Paybill)
+  mpesaPasskey               String    @default("") // Lipa na M-Pesa Online passkey
+  mpesaCallbackBaseUrl       String    @default("") // public https base for Daraja callbacks, e.g. https://mireli.co.ke
+  mpesaB2CShortcode          String    @default("") // initiator shortcode for B2C/refunds (blank = collection shortcode)
+  mpesaInitiatorName         String    @default("") // API operator for B2C / Reversal
+  mpesaInitiatorPassword     String    @default("") // encrypted with the Safaricom cert at call time
+  mpesaSecurityCredential    String    @default("") // OR paste a pre-encrypted security credential
+  mpesaCert                  String    @default("") // Safaricom public certificate (PEM)
+  mpesaLastTestAt            DateTime?
+  mpesaLastTestOk            Boolean?
+  mpesaLastTestMessage       String    @default("")
   adminEmails                String    @default("[\"demitri@mireli.co.ke\",\"admin@mireli.co.ke\"]")
   admin2faCode               String    @default("mireli2026")
   lastPayoutRunAt            DateTime?

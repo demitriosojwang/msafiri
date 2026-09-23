@@ -8,7 +8,17 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ksh } from "@/lib/format";
 import { api } from "@/lib/client";
-import { Loader2, MessageSquareText, Phone, ReceiptText, ShieldCheck, Smartphone } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Landmark,
+  Loader2,
+  MessageSquareText,
+  Phone,
+  ReceiptText,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
 
 interface PaySheetProps {
   open: boolean;
@@ -17,21 +27,40 @@ interface PaySheetProps {
   onPaid: () => void;
 }
 
+type PayMethod = "stk" | "paybill";
+type PayStep = "phone" | "stk" | "paybill" | "verifying" | "done";
+
 export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
-  const [step, setStep] = useState<"phone" | "stk" | "verifying" | "done">("phone");
+  const [method, setMethod] = useState<PayMethod>("stk");
+  const [paybill, setPaybill] = useState<string | null>(null);
+  const [step, setStep] = useState<PayStep>("phone");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ receipt: string; amount: number } | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
+      setMethod("stk");
       setStep("phone");
       setPhone("");
       setError(null);
       setReceipt(null);
+      setCopied(null);
+      // Which payment options are live? Paybill appears once the platform's
+      // shortcode is configured (Admin → Payments).
+      api<{ paybill: string | null; methods: string[] }>("/api/pay/options")
+        .then((res) => setPaybill(res.paybill))
+        .catch(() => setPaybill(null));
     }
   }, [open, booking.id]);
+
+  function copy(label: string, value: string) {
+    navigator.clipboard?.writeText(value).catch(() => {});
+    setCopied(label);
+    setTimeout(() => setCopied(null), 1500);
+  }
 
   async function sendPrompt() {
     setBusy(true);
@@ -48,6 +77,8 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
     }
   }
 
+  /** Verify works for both options: STK polls the push result; Paybill checks
+   *  for the landing payment (demo mode confirms, live waits for the webhook). */
   async function verify() {
     setStep("verifying");
     try {
@@ -59,13 +90,45 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
       onPaid();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Verification failed");
-      setStep("stk");
+      setStep(method === "stk" ? "stk" : "paybill");
     }
   }
 
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto">
+        {step !== "verifying" && step !== "done" && paybill && (
+          <div className="px-4 pt-1">
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1">
+              <button
+                onClick={() => {
+                  setMethod("stk");
+                  setStep("phone");
+                  setError(null);
+                }}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                  method === "stk" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                <Smartphone className="h-3.5 w-3.5" /> STK push
+              </button>
+              <button
+                onClick={() => {
+                  setMethod("paybill");
+                  setStep("paybill");
+                  setError(null);
+                }}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                  method === "paybill" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                <Landmark className="h-3.5 w-3.5" /> Pay bill
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STK: enter number ─────────────────────────────────────────────── */}
         {step === "phone" && (
           <>
             <SheetHeader>
@@ -97,6 +160,7 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
           </>
         )}
 
+        {/* ── STK: waiting for the PIN ──────────────────────────────────────── */}
         {step === "stk" && (
           <>
             <SheetHeader>
@@ -120,6 +184,65 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
               <Button variant="ghost" size="sm" onClick={() => setStep("phone")}>
                 Use a different number
               </Button>
+            </div>
+          </>
+        )}
+
+        {/* ── Paybill: manual instructions ──────────────────────────────────── */}
+        {step === "paybill" && (
+          <>
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
+                <Landmark className="h-5 w-5 text-primary" /> Pay via M-Pesa Pay Bill
+              </SheetTitle>
+              <SheetDescription id="pay-desc">
+                {booking.code} · {ksh(booking.cashDue)} goes straight into the Mi-Reli paybill — the
+                platform holds it until your ride is delivered.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="space-y-4 px-4 pb-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pay Bill number</p>
+                      <p className="font-mono text-base font-semibold">{paybill}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => copy("paybill", paybill || "")}>
+                      {copied === "paybill" ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copied === "paybill" ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Account number</p>
+                      <p className="font-mono text-base font-semibold">{booking.code}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => copy("account", booking.code)}>
+                      {copied === "account" ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copied === "account" ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Amount</p>
+                    <p className="text-base font-semibold">{ksh(booking.cashDue)}</p>
+                  </div>
+                </div>
+              </div>
+              <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+                <li>Open M-Pesa → Lipa na M-Pesa → Pay Bill.</li>
+                <li>Enter the Pay Bill number, then the account number above.</li>
+                <li>Enter the exact amount and your PIN.</li>
+              </ol>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <Button className="h-11 w-full" onClick={verify}>
+                I&apos;ve paid — verify
+              </Button>
+              <p className="text-center text-[10px] text-muted-foreground">
+                Confirmation usually lands within a minute of paying.
+              </p>
             </div>
           </>
         )}

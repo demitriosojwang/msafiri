@@ -16,6 +16,7 @@ import {
   Radar,
   Receipt,
   Users,
+  Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,7 @@ const NAV = [
   { href: "/admin/drivers", label: "Drivers", icon: Users },
   { href: "/admin/money", label: "Ledger", icon: Coins },
   { href: "/admin/reconciliation", label: "Recon", icon: Radar },
+  { href: "/admin/payments", label: "Payments", icon: Wallet },
   { href: "/admin/config", label: "Config", icon: CalendarCog },
   { href: "/admin/audit", label: "Audit", icon: Receipt },
 ];

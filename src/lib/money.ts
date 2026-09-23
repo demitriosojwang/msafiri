@@ -263,8 +263,8 @@ export async function executeCancellation(params: {
     if (entry.cashAmount > 0) {
       const result =
         method === "reversal"
-          ? daraja.reversal({ transactionId: entry.mpesaReceipt || booking.code, amount: entry.cashAmount })
-          : daraja.b2c({ receiverPhone: await passengerPhone(booking.passengerId), amount: entry.cashAmount });
+          ? await daraja.reversal({ transactionId: entry.mpesaReceipt || booking.code, amount: entry.cashAmount })
+          : await daraja.b2c({ receiverPhone: await passengerPhone(booking.passengerId), amount: entry.cashAmount });
       const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
       await db.refundRecord.update({
         where: { id: refund.id },
@@ -333,7 +333,7 @@ export async function executeCancellation(params: {
           status: "pending",
         },
       });
-      const result = daraja.b2c({
+      const result = await daraja.b2c({
         receiverPhone: await passengerPhone(booking.passengerId),
         amount,
       });
@@ -531,9 +531,10 @@ export async function executePayout(payoutId: string): Promise<boolean> {
     include: { driver: true },
   });
   if (!payout || payout.status === "completed") return payout?.status === "completed";
-  const result = daraja.b2c({
+  const result = await daraja.b2c({
     receiverPhone: payout.driver.mpesaNumber,
     amount: payout.netPayoutAmount,
+    remarks: `Mi-Reli payout ${payout.id}`,
   });
   const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
   await db.payoutRecord.update({
@@ -590,9 +591,10 @@ export async function runPayoutBatch(
     // Execute one representative record per driver with the SUM, but keep
     // per-trip records intact — mark each included record by batch result.
     const total = records.reduce((s, r) => s + r.netPayoutAmount, 0);
-    const result = daraja.b2c({
+    const result = await daraja.b2c({
       receiverPhone: records[0].driver.mpesaNumber,
       amount: total,
+      remarks: `Mi-Reli payout batch ${batchId}`,
     });
     const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
     for (const r of records) {
@@ -696,7 +698,11 @@ export async function runReconciliationSweep(
     where: { status: { in: ["stk_push_sent", "pending", "ambiguous"] }, createdAt: { lte: cutoff } },
   });
   for (const tx of ambiguous) {
-    const statusResult = daraja.transactionStatus(tx.checkoutRequestId);
+    const statusResult = await daraja.transactionStatus(tx.checkoutRequestId);
+    if (statusResult.pending) {
+      // Live mode: Daraja has no terminal result yet — leave it for the next sweep.
+      continue;
+    }
     const ok = statusResult.resultCode === daraja.RESULT_CODES.SUCCESS;
     if (ok && statusResult.mpesaReceipt) {
       await db.mpesaTransaction.update({

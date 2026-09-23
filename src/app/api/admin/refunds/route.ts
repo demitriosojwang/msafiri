@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
 
   const result =
     refund.method === "reversal"
-      ? daraja.reversal({ transactionId: refund.ledgerEntry.mpesaReceipt || refund.booking.code, amount: refund.amount })
-      : daraja.b2c({ receiverPhone: refund.booking.passenger.phone, amount: refund.amount });
+      ? await daraja.reversal({ transactionId: refund.ledgerEntry.mpesaReceipt || refund.booking.code, amount: refund.amount })
+      : await daraja.b2c({ receiverPhone: refund.booking.passenger.phone, amount: refund.amount, remarks: `Refund ${refund.booking.code}` });
   const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
   await db.refundRecord.update({
     where: { id: refund.id },

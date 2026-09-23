@@ -1,0 +1,812 @@
+     1→import { db } from "@/lib/db";
+     2→import { audit } from "@/lib/audit";
+     3→import * as daraja from "@/lib/daraja";
+     4→
+     5→/**
+     6→ * The money engine.
+     7→ *
+     8→ * Principle: money is collected into the platform's own M-Pesa shortcode first
+     9→ * — it never goes directly to a driver. Every shilling is tracked in the
+    10→ * ledger as exactly one of:
+    11→ *   held | driver_payable | commission_taken | refunded | partially_refunded
+    12→ *   | converted_to_credit | forfeited
+    13→ *
+    14→ * The admin never touches these flows — they are config-driven and automatic.
+    15→ */
+    16→
+    17→// ─── Config ──────────────────────────────────────────────────────────────────
+    18→
+    19→export const NTSA_COMMISSION_CAP = 0.18;
+    20→
+    21→export async function getConfig() {
+    22→  let cfg = await db.platformConfig.findUnique({ where: { id: "main" } });
+    23→  if (!cfg) {
+    24→    cfg = await db.platformConfig.create({ data: { id: "main" } });
+    25→  }
+    26→  return cfg;
+    27→}
+    28→
+    29→// ─── Credits (travel vouchers — never cashed out) ────────────────────────────
+    30→
+    31→export async function issueCredit(params: {
+    32→  passengerId: string;
+    33→  sourceBookingId?: string;
+    34→  amount: number;
+    35→  note?: string;
+    36→  validityDays: number;
+    37→}) {
+    38→  return db.credit.create({
+    39→    data: {
+    40→      passengerId: params.passengerId,
+    41→      sourceBookingId: params.sourceBookingId,
+    42→      amount: params.amount,
+    43→      initialAmount: params.amount,
+    44→      note: params.note,
+    45→      expiresAt: new Date(Date.now() + params.validityDays * 24 * 60 * 60 * 1000),
+    46→    },
+    47→  });
+    48→}
+    49→
+    50→/** FIFO partial redemption across a passenger's active credits.
+    51→ *  Returns total applied; each credit is reduced (marked "redeemed" only once
+    52→ *  fully used). A credit is never cashed out — it only ever offsets fares. */
+    53→export async function applyCredits(
+    54→  passengerId: string,
+    55→  bookingId: string,
+    56→  needed: number
+    57→): Promise<number> {
+    58→  const credits = await db.credit.findMany({
+    59→    where: {
+    60→      passengerId,
+    61→      status: "active",
+    62→      amount: { gt: 0 },
+    63→      expiresAt: { gt: new Date() },
+    64→    },
+    65→    orderBy: { expiresAt: "asc" }, // use soonest-expiring first
+    66→  });
+    67→  let applied = 0;
+    68→  for (const c of credits) {
+    69→    if (applied >= needed) break;
+    70→    const take = Math.min(c.amount, needed - applied);
+    71→    if (take <= 0) continue;
+    72→    const remaining = c.amount - take;
+    73→    await db.credit.update({
+    74→      where: { id: c.id },
+    75→      data: {
+    76→        amount: remaining,
+    77→        status: remaining <= 0 ? "redeemed" : "active",
+    78→        redeemedAt: remaining <= 0 ? new Date() : null,
+    79→        redeemedBookingId: bookingId,
+    80→      },
+    81→    });
+    82→    applied += take;
+    83→  }
+    84→  return applied;
+    85→}
+    86→
+    87→/** Restore a credit portion when a booking that used credit is cancelled
+    88→ *  early or by the platform (the passenger gave notice / wasn't at fault). */
+    89→export async function restoreCredit(params: {
+    90→  passengerId: string;
+    91→  sourceBookingId: string;
+    92→  amount: number;
+    93→  validityDays: number;
+    94→  note: string;
+    95→}) {
+    96→  if (params.amount <= 0) return null;
+    97→  return issueCredit({
+    98→    passengerId: params.passengerId,
+    99→    sourceBookingId: params.sourceBookingId,
+   100→    amount: params.amount,
+   101→    note: params.note,
+   102→    validityDays: params.validityDays,
+   103→  });
+   104→}
+   105→
+   106→export async function expireStaleCredits(): Promise<number> {
+   107→  const res = await db.credit.updateMany({
+   108→    where: { status: "active", expiresAt: { lte: new Date() } },
+   109→    data: { status: "expired" },
+   110→  });
+   111→  return res.count;
+   112→}
+   113→
+   114→// ─── Fare collection → ledger ────────────────────────────────────────────────
+   115→
+   116→/** On STK success callback: create the ledger entry with status = held.
+   117→ *  This is money sitting in the platform shortcode, not yet belonging to
+   118→ *  anyone. Credit-funded value is recorded alongside for full-fare tracking
+   119→ *  but only `cashAmount` ever moved through M-Pesa. */
+   120→export async function recordCollection(params: {
+   121→  bookingId: string;
+   122→  tripId: string | null;
+   123→  totalAmount: number;
+   124→  cashAmount: number;
+   125→  creditApplied: number;
+   126→  homeSurchargeAmount: number;
+   127→  mpesaReceipt: string | null;
+   128→}) {
+   129→  const existing = await db.ledgerEntry.findUnique({
+   130→    where: { bookingId: params.bookingId },
+   131→  });
+   132→  if (existing) return existing; // idempotent — never double-record a collection
+   133→  return db.ledgerEntry.create({
+   134→    data: {
+   135→      bookingId: params.bookingId,
+   136→      tripId: params.tripId,
+   137→      totalAmount: params.totalAmount,
+   138→      cashAmount: params.cashAmount,
+   139→      creditApplied: params.creditApplied,
+   140→      homeSurchargeAmount: params.homeSurchargeAmount,
+   141→      mpesaReceipt: params.mpesaReceipt,
+   142→      collectedAt: params.cashAmount > 0 ? new Date() : null,
+   143→      status: "held",
+   144→    },
+   145→  });
+   146→}
+   147→
+   148→// ─── Refund tiers ────────────────────────────────────────────────────────────
+   149→
+   150→export type RefundTier =
+   151→  | "early" // before trip lock → full cash refund
+   152→  | "late" // after lock, before departure → full fare converts to credit
+   153→  | "no_show" // never cancelled, never showed → forfeited
+   154→  | "platform_cancelled"; // platform/driver cancelled → full cash refund always
+   155→
+   156→/** Resolves the tier from the booking/trip state + config (never hardcoded). */
+   157→export async function resolveRefundTier(bookingId: string): Promise<{
+   158→  tier: RefundTier | null;
+   159→  detail: string;
+   160→}> {
+   161→  const booking = await db.booking.findUnique({
+   162→    where: { id: bookingId },
+   163→    include: { trip: true },
+   164→  });
+   165→  if (!booking) return { tier: null, detail: "Booking not found" };
+   166→
+   167→  if (booking.status === "awaiting_payment")
+   168→    return { tier: null, detail: "Nothing collected yet — booking simply voids." };
+   169→  if (["cancelled", "completed", "no_show"].includes(booking.status))
+   170→    return { tier: null, detail: `Booking already ${booking.status}.` };
+   171→
+   172→  const trip = booking.trip;
+   173→  if (!trip)
+   174→    return { tier: null, detail: "Booking not yet allocated to a trip — voids without refund." };
+   175→
+   176→  if (trip.status === "cancelled")
+   177→    return { tier: "platform_cancelled", detail: "Trip was cancelled by the platform." };
+   178→  if (trip.status === "departed" || trip.status === "completed")
+   179→    return { tier: null, detail: "Trip already departed — cancellation window closed." };
+   180→
+   181→  // Trip still pre-departure: lock state decides early vs late
+   182→  const locked = trip.status === "locked" || trip.lockedAt !== null;
+   183→  if (locked) return { tier: "late", detail: "Trip locked — late cancellation converts fare to credit." };
+   184→  return { tier: "early", detail: "Before lock — full cash refund." };
+   185→}
+   186→
+   187→const REFUND_METHOD_WINDOW_MS = 24 * 60 * 60 * 1000; // Reversal works in a short window
+   188→
+   189→/** Executes the cancellation outcome for a collected booking. */
+   190→export async function executeCancellation(params: {
+   191→  bookingId: string;
+   192→  actor: { id: string; name: string; role: "passenger" | "admin" | "system" };
+   193→  trigger:
+   194→    | "passenger_cancel"
+   195→    | "platform_cancel"
+   196→    | "trip_cancel_unboarded"
+   197→    | "admin_override"
+   198→    | "no_show_resolution";
+   199→  overrideAmount?: number; // admin_override partial refund
+   200→}): Promise<{ outcome: string; tier: RefundTier | null }> {
+   201→  const cfg = await getConfig();
+   202→  const booking = await db.booking.findUnique({
+   203→    where: { id: params.bookingId },
+   204→    include: { trip: true, ledgerEntry: true },
+   205→  });
+   206→  if (!booking) throw new Error("Booking not found");
+   207→  const entry = booking.ledgerEntry;
+   208→
+   209→  // Nothing collected yet → just void the booking
+   210→  if (!entry) {
+   211→    await db.booking.update({
+   212→      where: { id: booking.id },
+   213→      data: { status: "cancelled", cancelledAt: new Date(), cancelTier: "early" },
+   214→    });
+   215→    await audit({
+   216→      actorId: params.actor.id,
+   217→      actorName: params.actor.name,
+   218→      actorRole: params.actor.role,
+   219→      action: "booking.void_unpaid",
+   220→      entity: "booking",
+   221→      entityId: booking.id,
+   222→      metadata: { code: booking.code },
+   223→    });
+   224→    return { outcome: "voided_unpaid", tier: "early" };
+   225→  }
+   226→
+   227→  let tier: RefundTier;
+   228→  if (params.trigger === "no_show_resolution") {
+   229→    tier = "no_show";
+   230→  } else if (params.trigger === "platform_cancel" || params.trigger === "trip_cancel_unboarded") {
+   231→    tier = "platform_cancelled";
+   232→  } else if (params.trigger === "admin_override") {
+   233→    tier = "late"; // override treated as a discretionary cash refund post-lock
+   234→  } else {
+   235→    const resolved = await resolveRefundTier(booking.id);
+   236→    if (!resolved.tier) throw new Error(resolved.detail);
+   237→    tier = resolved.tier;
+   238→  }
+   239→
+   240→  const now = new Date();
+   241→
+   242→  if (tier === "early" || tier === "platform_cancelled") {
+   243→    // Full cash refund — Reversal if inside the short window, else B2C
+   244→    const method =
+   245→      entry.collectedAt && now.getTime() - entry.collectedAt.getTime() < REFUND_METHOD_WINDOW_MS
+   246→        ? "reversal"
+   247→        : "b2c";
+   248→    const refund = await db.refundRecord.create({
+   249→      data: {
+   250→        ledgerEntryId: entry.id,
+   251→        bookingId: booking.id,
+   252→        amount: entry.cashAmount,
+   253→        creditRestored: entry.creditApplied,
+   254→        reason:
+   255→          tier === "platform_cancelled"
+   256→            ? "platform_cancelled"
+   257→            : "cancelled_early",
+   258→        method,
+   259→        status: "pending",
+   260→      },
+   261→    });
+   262→
+   263→    if (entry.cashAmount > 0) {
+   264→      const result =
+   265→        method === "reversal"
+   266→          ? daraja.reversal({ transactionId: entry.mpesaReceipt || booking.code, amount: entry.cashAmount })
+   267→          : daraja.b2c({ receiverPhone: await passengerPhone(booking.passengerId), amount: entry.cashAmount });
+   268→      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
+   269→      await db.refundRecord.update({
+   270→        where: { id: refund.id },
+   271→        data: {
+   272→          status: ok ? "completed" : "failed",
+   273→          mpesaResultCode: result.resultCode,
+   274→          failureReason: ok ? null : result.resultDesc,
+   275→          completedAt: ok ? new Date() : null,
+   276→        },
+   277→      });
+   278→      await db.ledgerEntry.update({
+   279→        where: { id: entry.id },
+   280→        data: {
+   281→          status: ok ? "refunded" : "partially_refunded",
+   282→          statusChangedAt: new Date(),
+   283→        },
+   284→      });
+   285→    } else {
+   286→      // Credit-only booking: no cash to move, ledger simply releases the hold
+   287→      await db.refundRecord.update({
+   288→        where: { id: refund.id },
+   289→        data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: new Date() },
+   290→      });
+   291→      await db.ledgerEntry.update({
+   292→        where: { id: entry.id },
+   293→        data: { status: "refunded", statusChangedAt: new Date() },
+   294→      });
+   295→    }
+   296→
+   297→    // Restore the credit portion (passenger gave notice / not at fault)
+   298→    await restoreCredit({
+   299→      passengerId: booking.passengerId,
+   300→      sourceBookingId: booking.id,
+   301→      amount: entry.creditApplied,
+   302→      validityDays: cfg.creditValidityDays,
+   303→      note: `Credit restored — refund on ${booking.code}`,
+   304→    });
+   305→
+   306→    await db.booking.update({
+   307→      where: { id: booking.id },
+   308→      data: { status: "cancelled", cancelledAt: now, cancelTier: tier },
+   309→    });
+   310→    await audit({
+   311→      actorId: params.actor.id,
+   312→      actorName: params.actor.name,
+   313→      actorRole: params.actor.role,
+   314→      action: tier === "platform_cancelled" ? "money.platform_refund" : "money.refund_early",
+   315→      entity: "booking",
+   316→      entityId: booking.id,
+   317→      metadata: { code: booking.code, amount: entry.cashAmount, method, tier },
+   318→    });
+   319→    return { outcome: "refunded", tier };
+   320→  }
+   321→
+   322→  if (tier === "late") {
+   323→    if (params.trigger === "admin_override") {
+   324→      // Discretionary cash refund by admin (disputes) — amount from params
+   325→      const amount = Math.min(params.overrideAmount ?? entry.cashAmount, entry.cashAmount);
+   326→      const refund = await db.refundRecord.create({
+   327→        data: {
+   328→          ledgerEntryId: entry.id,
+   329→          bookingId: booking.id,
+   330→          amount,
+   331→          reason: "admin_override",
+   332→          method: "b2c",
+   333→          status: "pending",
+   334→        },
+   335→      });
+   336→      const result = daraja.b2c({
+   337→        receiverPhone: await passengerPhone(booking.passengerId),
+   338→        amount,
+   339→      });
+   340→      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
+   341→      await db.refundRecord.update({
+   342→        where: { id: refund.id },
+   343→        data: {
+   344→          status: ok ? "completed" : "failed",
+   345→          mpesaResultCode: result.resultCode,
+   346→          failureReason: ok ? null : result.resultDesc,
+   347→          completedAt: ok ? new Date() : null,
+   348→        },
+   349→      });
+   350→      // Commission reversal is proportional — the platform never keeps a
+   351→      // commission on a refunded fare.
+   352→      const cfgC = await getConfig();
+   353→      const commissionReversed = Math.round(amount * cfgC.commissionRate);
+   354→      const driverClawback = amount - commissionReversed;
+   355→      await db.refundRecord.update({
+   356→        where: { id: refund.id },
+   357→        data: { commissionReversed, driverClawback },
+   358→      });
+   359→      await db.ledgerEntry.update({
+   360→        where: { id: entry.id },
+   361→        data: {
+   362→          status: amount >= entry.cashAmount ? "refunded" : "partially_refunded",
+   363→          statusChangedAt: new Date(),
+   364→        },
+   365→      });
+   366→      await db.booking.update({
+   367→        where: { id: booking.id },
+   368→        data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
+   369→      });
+   370→      await audit({
+   371→        actorId: params.actor.id,
+   372→        actorName: params.actor.name,
+   373→        actorRole: params.actor.role,
+   374→        action: "money.admin_override_refund",
+   375→        entity: "booking",
+   376→        entityId: booking.id,
+   377→        metadata: { code: booking.code, amount, commissionReversed, driverClawback },
+   378→      });
+   379→      return { outcome: "admin_refund", tier: "late" };
+   380→    }
+   381→
+   382→    // Passenger late cancellation: NO cash moves — full fare converts to a
+   383→    // travel credit. The money stays on the platform as a liability, not a
+   384→    // payout, and the passenger never loses it.
+   385→    await issueCredit({
+   386→      passengerId: booking.passengerId,
+   387→      sourceBookingId: booking.id,
+   388→      amount: entry.totalAmount, // full fare: cash + credit portions
+   389→      note: `Late cancellation of ${booking.code} — fare saved as credit`,
+   390→      validityDays: cfg.creditValidityDays,
+   391→    });
+   392→    await db.ledgerEntry.update({
+   393→      where: { id: entry.id },
+   394→      data: { status: "converted_to_credit", statusChangedAt: new Date() },
+   395→    });
+   396→    await db.booking.update({
+   397→      where: { id: booking.id },
+   398→      data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
+   399→    });
+   400→    await audit({
+   401→      actorId: params.actor.id,
+   402→      actorName: params.actor.name,
+   403→      actorRole: params.actor.role,
+   404→      action: "money.late_cancel_to_credit",
+   405→      entity: "booking",
+   406→      entityId: booking.id,
+   407→      metadata: {
+   408→        code: booking.code,
+   409→        creditIssued: entry.totalAmount,
+   410→        validDays: cfg.creditValidityDays,
+   411→      },
+   412→    });
+   413→    return { outcome: "converted_to_credit", tier: "late" };
+   414→  }
+   415→
+   416→  // no_show — reached only via the completion engine
+   417→  await db.booking.update({
+   418→    where: { id: booking.id },
+   419→    data: { status: "no_show", cancelTier: "no_show" },
+   420→  });
+   421→  await db.ledgerEntry.update({
+   422→    where: { id: entry.id },
+   423→    data: { status: "forfeited", statusChangedAt: new Date() },
+   424→  });
+   425→  await audit({
+   426→    actorId: params.actor.id,
+   427→    actorName: params.actor.name,
+   428→    actorRole: params.actor.role,
+   429→    action: "money.no_show_forfeit",
+   430→    entity: "booking",
+   431→    entityId: booking.id,
+   432→    metadata: { code: booking.code, amount: entry.totalAmount },
+   433→  });
+   434→  return { outcome: "forfeited", tier: "no_show" };
+   435→}
+   436→
+   437→async function passengerPhone(passengerId: string): Promise<string> {
+   438→  const p = await db.passenger.findUnique({ where: { id: passengerId } });
+   439→  return p?.phone || "";
+   440→}
+   441→
+   442→// ─── Trip completion → payout records ────────────────────────────────────────
+   443→
+   444→/** Fires when a trip is COMPLETED (service delivered) — never at booking,
+   445→ *  never at lock. Creates one payout record per booking manifest line. */
+   446→export async function onTripCompleted(tripId: string) {
+   447→  const cfg = await getConfig();
+   448→  const trip = await db.trip.findUnique({
+   449→    where: { id: tripId },
+   450→    include: { bookings: { include: { ledgerEntry: true, passenger: true } } },
+   451→  });
+   452→  if (!trip || trip.status === "completed") return;
+   453→  if (!trip.driverId) return; // nothing owed if no driver was ever assigned
+   454→
+   455→  const now = new Date();
+   456→
+   457→  for (const b of trip.bookings) {
+   458→    const entry = b.ledgerEntry;
+   459→    if (!entry) continue;
+   460→
+   461→    if (b.status === "boarded" || b.status === "confirmed") {
+   462→      // Delivered passenger (confirmed-but-not-checked-in would have been
+   463→      // handled as no-show at departure; treat late check-ins as delivered).
+   464→      await db.booking.update({
+   465→        where: { id: b.id },
+   466→        data: { status: "completed" },
+   467→      });
+   468→      if (entry.status === "held") {
+   469→        await db.ledgerEntry.update({
+   470→          where: { id: entry.id },
+   471→          data: { status: "driver_payable", statusChangedAt: now },
+   472→        });
+   473→
+   474→        const gross = entry.totalAmount;
+   475→        const homeSurcharge = entry.homeSurchargeAmount;
+   476→        // Home surcharge passes to the driver in full — it compensates their
+   477→        // detour and is NOT part of the commission base.
+   478→        const commissionBase = Math.max(gross - homeSurcharge, 0);
+   479→        const commission = Math.round(commissionBase * cfg.commissionRate);
+   480→        const net = gross - commission;
+   481→
+   482→        const payout = await db.payoutRecord.create({
+   483→          data: {
+   484→            driverId: trip.driverId,
+   485→            tripId: trip.id,
+   486→            grossFareTotal: gross,
+   487→            commissionAmount: commission,
+   488→            homeSurchargeAmount: homeSurcharge,
+   489→            netPayoutAmount: net,
+   490→            method: "b2c",
+   491→            status: "queued",
+   492→          },
+   493→        });
+   494→
+   495→        // instant_per_trip mode fires the B2C immediately
+   496→        if (cfg.payoutMode === "instant_per_trip") {
+   497→          await executePayout(payout.id);
+   498→        }
+   499→      }
+   500→    } else if (b.status === "confirmed") {
+   501→      // defensive: never checked in → no-show resolution
+   502→      await executeCancellation({
+   503→        bookingId: b.id,
+   504→        actor: { id: "system", name: "Ops Engine", role: "system" },
+   505→        trigger: "no_show_resolution",
+   506→      });
+   507→    }
+   508→    // cancelled / no_show bookings: ledger already terminal
+   509→  }
+   510→
+   511→  await db.trip.update({
+   512→    where: { id: tripId },
+   513→    data: { status: "completed", completedAt: now },
+   514→  });
+   515→  await audit({
+   516→    actorId: "system",
+   517→    actorName: "Ops Engine",
+   518→    actorRole: "system",
+   519→    action: "trip.completed",
+   520→    entity: "trip",
+   521→    entityId: tripId,
+   522→    metadata: { payoutsCreated: true },
+   523→  });
+   524→}
+   525→
+   526→/** Executes one queued payout via B2C. Failure flags for admin review —
+   527→ *  never silently retried against a possibly bad number. */
+   528→export async function executePayout(payoutId: string): Promise<boolean> {
+   529→  const payout = await db.payoutRecord.findUnique({
+   530→    where: { id: payoutId },
+   531→    include: { driver: true },
+   532→  });
+   533→  if (!payout || payout.status === "completed") return payout?.status === "completed";
+   534→  const result = daraja.b2c({
+   535→    receiverPhone: payout.driver.mpesaNumber,
+   536→    amount: payout.netPayoutAmount,
+   537→  });
+   538→  const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
+   539→  await db.payoutRecord.update({
+   540→    where: { id: payout.id },
+   541→    data: {
+   542→      status: ok ? "completed" : "failed",
+   543→      mpesaResultCode: result.resultCode,
+   544→      failureReason: ok ? null : result.resultDesc,
+   545→      completedAt: ok ? new Date() : null,
+   546→    },
+   547→  });
+   548→  if (ok) {
+   549→    // The platform has now taken its commission and paid the driver —
+   550→    // the ledger line moves to its terminal bucket.
+   551→    await db.ledgerEntry.updateMany({
+   552→      where: { tripId: payout.tripId, status: "driver_payable" },
+   553→      data: { status: "commission_taken", statusChangedAt: new Date() },
+   554→    });
+   555→  } else {
+   556→    await audit({
+   557→      actorId: "system",
+   558→      actorName: "Ops Engine",
+   559→      actorRole: "system",
+   560→      action: "money.payout_failed",
+   561→      entity: "payout",
+   562→      entityId: payout.id,
+   563→      metadata: { driver: payout.driver.name, reason: result.resultDesc },
+   564→    });
+   565→  }
+   566→  return ok;
+   567→}
+   568→
+   569→/** Scheduled payout run — weekly by default (mirrors Uber/Bolt in Kenya).
+   570→ *  Sums every queued payout per driver into ONE B2C transfer. */
+   571→export async function runPayoutBatch(
+   572→  actor: { id: string; name: string; role: "passenger" | "admin" | "system" }
+   573→): Promise<{ drivers: number; completed: number; failed: number }> {
+   574→  const queued = await db.payoutRecord.findMany({
+   575→    where: { status: "queued" },
+   576→    include: { driver: true },
+   577→  });
+   578→  const byDriver = new Map<string, typeof queued>();
+   579→  for (const p of queued) {
+   580→    const list = byDriver.get(p.driverId) || [];
+   581→    list.push(p);
+   582→    byDriver.set(p.driverId, list);
+   583→  }
+   584→
+   585→  const batchId = `batch-${Date.now()}`;
+   586→  let completed = 0;
+   587→  let failed = 0;
+   588→
+   589→  for (const [, records] of byDriver) {
+   590→    // Execute one representative record per driver with the SUM, but keep
+   591→    // per-trip records intact — mark each included record by batch result.
+   592→    const total = records.reduce((s, r) => s + r.netPayoutAmount, 0);
+   593→    const result = daraja.b2c({
+   594→      receiverPhone: records[0].driver.mpesaNumber,
+   595→      amount: total,
+   596→    });
+   597→    const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
+   598→    for (const r of records) {
+   599→      await db.payoutRecord.update({
+   600→        where: { id: r.id },
+   601→        data: {
+   602→          status: ok ? "completed" : "failed",
+   603→          mpesaResultCode: result.resultCode,
+   604→          failureReason: ok ? null : result.resultDesc,
+   605→          batchId,
+   606→          completedAt: ok ? new Date() : null,
+   607→        },
+   608→      });
+   609→      if (ok) {
+   610→        await db.ledgerEntry.updateMany({
+   611→          where: { tripId: r.tripId, status: "driver_payable" },
+   612→          data: { status: "commission_taken", statusChangedAt: new Date() },
+   613→        });
+   614→        completed++;
+   615→      } else {
+   616→        failed++;
+   617→      }
+   618→    }
+   619→    if (!ok) {
+   620→      await audit({
+   621→        actorId: actor.id,
+   622→        actorName: actor.name,
+   623→        actorRole: actor.role,
+   624→        action: "money.payout_batch_failure",
+   625→        entity: "driver",
+   626→        entityId: records[0].driverId,
+   627→        metadata: { driver: records[0].driver.name, total, reason: result.resultDesc },
+   628→      });
+   629→    }
+   630→  }
+   631→
+   632→  await db.platformConfig.update({
+   633→    where: { id: "main" },
+   634→    data: { lastPayoutRunAt: new Date() },
+   635→  });
+   636→  await audit({
+   637→    actorId: actor.id,
+   638→    actorName: actor.name,
+   639→    actorRole: actor.role,
+   640→    action: "money.payout_batch_run",
+   641→    entity: "system",
+   642→    entityId: batchId,
+   643→    metadata: { drivers: byDriver.size, completed, failed },
+   644→  });
+   645→  return { drivers: byDriver.size, completed, failed };
+   646→}
+   647→
+   648→/** Is the scheduled payout batch due? (weekly default, config-driven) */
+   649→export async function isPayoutBatchDue(): Promise<{ due: boolean; mode: string; note: string }> {
+   650→  const cfg = await getConfig();
+   651→  if (cfg.payoutMode === "instant_per_trip")
+   652→    return { due: false, mode: cfg.payoutMode, note: "Payouts fire instantly per trip completion." };
+   653→  const now = new Date();
+   654→  if (cfg.payoutMode === "daily") {
+   655→    const last = cfg.lastPayoutRunAt;
+   656→    const due = !last || now.getTime() - last.getTime() >= 20 * 60 * 60 * 1000;
+   657→    return { due, mode: "daily", note: due ? "Daily batch due." : "Already run today." };
+   658→  }
+   659→  // weekly
+   660→  const due = now.getUTCDay() === cfg.payoutDay;
+   661→  const last = cfg.lastPayoutRunAt;
+   662→  const alreadyThisWeek =
+   663→    last && now.getTime() - last.getTime() < 6 * 24 * 60 * 60 * 1000;
+   664→  return {
+   665→    due: due && !alreadyThisWeek,
+   666→    mode: "weekly",
+   667→    note: due
+   668→      ? alreadyThisWeek
+   669→        ? "Batch day — already ran this week."
+   670→        : "Weekly batch day (like Uber/Bolt in Kenya)."
+   671→      : `Runs on day ${cfg.payoutDay} of the week.`,
+   672→  };
+   673→}
+   674→
+   675→// ─── Reconciliation sweep (the nightly job) ──────────────────────────────────
+   676→
+   677→/** Never rely on the callback alone. This sweep resolves any booking left in
+   678→ *  an ambiguous state so a missed webhook never silently loses a passenger's
+   679→ *  paid seat or a driver's payout trigger. */
+   680→export async function runReconciliationSweep(
+   681→  actor: { id: string; name: string; role: "passenger" | "admin" | "system" }
+   682→) {
+   683→  const cfg = await getConfig();
+   684→  const now = new Date();
+   685→  const summary = {
+   686→    recoveredPayments: 0,
+   687→    failedPayments: 0,
+   688→    completedRefunds: 0,
+   689→    flaggedStuckRefunds: 0,
+   690→    expiredCredits: 0,
+   691→  };
+   692→
+   693→  // 1. Ambiguous STK pushes older than the sweep threshold
+   694→  const cutoff = new Date(now.getTime() - cfg.sweepPendingMinutes * 60 * 1000);
+   695→  const ambiguous = await db.mpesaTransaction.findMany({
+   696→    where: { status: { in: ["stk_push_sent", "pending", "ambiguous"] }, createdAt: { lte: cutoff } },
+   697→  });
+   698→  for (const tx of ambiguous) {
+   699→    const statusResult = daraja.transactionStatus(tx.checkoutRequestId);
+   700→    const ok = statusResult.resultCode === daraja.RESULT_CODES.SUCCESS;
+   701→    if (ok && statusResult.mpesaReceipt) {
+   702→      await db.mpesaTransaction.update({
+   703→        where: { id: tx.id },
+   704→        data: {
+   705→          status: "confirmed",
+   706→          resultCode: statusResult.resultCode,
+   707→          resultDesc: statusResult.resultDesc,
+   708→          mpesaReceipt: statusResult.mpesaReceipt,
+   709→          confirmedAt: now,
+   710→        },
+   711→      });
+   712→      const applied = await confirmBookingPayment(tx.bookingId, {
+   713→        receipt: statusResult.mpesaReceipt,
+   714→        checkoutRequestId: tx.checkoutRequestId,
+   715→      });
+   716→      if (applied) summary.recoveredPayments++;
+   717→    } else {
+   718→      await db.mpesaTransaction.update({
+   719→        where: { id: tx.id },
+   720→        data: { status: "failed", resultCode: daraja.RESULT_CODES.CANCELLED, resultDesc: "No confirmation — treated as cancelled" },
+   721→      });
+   722→      summary.failedPayments++;
+   723→    }
+   724→  }
+   725→
+   726→  // 2. Refunds stuck in pending — give them a terminal state or flag
+   727→  const pendingRefunds = await db.refundRecord.findMany({ where: { status: "pending" } });
+   728→  for (const r of pendingRefunds) {
+   729→    const stuck = now.getTime() - r.initiatedAt.getTime() > cfg.stuckRefundHours * 60 * 60 * 1000;
+   730→    if (stuck) {
+   731→      await db.refundRecord.update({
+   732→        where: { id: r.id },
+   733→        data: { stuckFlaggedAt: now },
+   734→      });
+   735→      summary.flaggedStuckRefunds++;
+   736→    }
+   737→  }
+   738→  // Prototype: sweep also completes pending reversals/b2c (simulated callback)
+   739→  const completable = await db.refundRecord.findMany({
+   740→    where: { status: "pending", stuckFlaggedAt: null },
+   741→    take: 20,
+   742→  });
+   743→  for (const r of completable) {
+   744→    // Prototype: the refund callback arrives — give it its terminal state.
+   745→    await db.refundRecord.update({
+   746→      where: { id: r.id },
+   747→      data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+   748→    });
+   749→    await db.ledgerEntry.update({
+   750→      where: { id: r.ledgerEntryId },
+   751→      data: { status: "refunded", statusChangedAt: now },
+   752→    });
+   753→    summary.completedRefunds++;
+   754→  }
+   755→
+   756→  // 3. Expire stale credits
+   757→  summary.expiredCredits = await expireStaleCredits();
+   758→
+   759→  await db.platformConfig.update({
+   760→    where: { id: "main" },
+   761→    data: { lastReconciliationAt: now },
+   762→  });
+   763→  await audit({
+   764→    actorId: actor.id,
+   765→    actorName: actor.name,
+   766→    actorRole: actor.role,
+   767→    action: "money.reconciliation_sweep",
+   768→    entity: "system",
+   769→    entityId: "sweep",
+   770→    metadata: summary,
+   771→  });
+   772→  return summary;
+   773→}
+   774→
+   775→// ─── Payment confirmation (shared by verify step + sweep) ────────────────────
+   776→
+   777→export async function confirmBookingPayment(
+   778→  bookingId: string,
+   779→  tx: { receipt: string; checkoutRequestId: string }
+   780→): Promise<boolean> {
+   781→  const booking = await db.booking.findUnique({
+   782→    where: { id: bookingId },
+   783→    include: { ledgerEntry: true },
+   784→  });
+   785→  if (!booking) return false;
+   786→  if (booking.status === "awaiting_payment") {
+   787→    await db.booking.update({
+   788→      where: { id: bookingId },
+   789→      data: { status: "confirmed" },
+   790→    });
+   791→  }
+   792→  await recordCollection({
+   793→    bookingId: booking.id,
+   794→    tripId: booking.tripId,
+   795→    totalAmount: booking.fareAmount,
+   796→    cashAmount: booking.cashDue,
+   797→    creditApplied: booking.creditApplied,
+   798→    homeSurchargeAmount: booking.homeSurcharge,
+   799→    mpesaReceipt: tx.receipt,
+   800→  });
+   801→  await audit({
+   802→    actorId: booking.passengerId,
+   803→    actorName: "Passenger",
+   804→    actorRole: "passenger",
+   805→    action: "payment.confirm",
+   806→    entity: "booking",
+   807→    entityId: booking.id,
+   808→    metadata: { receipt: tx.receipt, amount: booking.cashDue },
+   809→  });
+   810→  return true;
+   811→}
+   812→
