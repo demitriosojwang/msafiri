@@ -4,7 +4,7 @@ import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
-import { generateBookingCode } from "@/lib/daraja";
+import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
 
 /** My bookings */
 export async function GET() {
@@ -42,6 +42,8 @@ export async function GET() {
       tripStatus: b.trip?.status || null,
       driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate, cabType: b.trip.driver.cabType } : null,
       allocationNote: b.allocationNote,
+      passengerName: b.passengerName,
+      passengerPhone: b.passengerPhone,
       checkedInAt: b.checkedInAt,
       lockNote:
         b.trip?.status === "locked"
@@ -75,7 +77,23 @@ export async function POST(req: NextRequest) {
     isCharter = false,
     applyCredit = false,
     travelDate, // YYYY-MM-DD (the day the passenger wants to travel)
+    passengerName, // guest checkout — no account needed
+    passengerPhone, // doubles as the default M-Pesa number
   } = body;
+
+  // Guest checkout details (Tahmeed-style): anyone can book and pay without
+  // signing in — we just need to know who is travelling and how to reach them.
+  const guestName = String(passengerName || "").trim();
+  if (guestName.length < 2) {
+    return NextResponse.json({ error: "Enter the passenger's full name" }, { status: 400 });
+  }
+  const guestPhone = toMpesaMsISDN(String(passengerPhone || ""));
+  if (!guestPhone) {
+    return NextResponse.json(
+      { error: "Enter a valid M-Pesa number (07XX XXX XXX or 2547XX XXX XXX)" },
+      { status: 400 },
+    );
+  }
 
   const cfg = await getConfig();
   const route = await db.route.findUnique({ where: { id: routeId }, include: { stages: true } });
@@ -108,6 +126,8 @@ export async function POST(req: NextRequest) {
       creditApplied: 0,
       cashDue: total,
       status: "awaiting_payment",
+      passengerName: guestName.slice(0, 80),
+      passengerPhone: guestPhone,
     },
   });
 
@@ -142,7 +162,7 @@ export async function POST(req: NextRequest) {
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note },
+    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: guestName, passengerPhone: guestPhone },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
@@ -186,6 +206,8 @@ export async function POST(req: NextRequest) {
       stageName: fresh!.stageName,
       seats: fresh!.seats,
       isCharter: fresh!.isCharter,
+      passengerName: fresh!.passengerName,
+      passengerPhone: fresh!.passengerPhone,
       trip: fresh!.trip
         ? {
             id: fresh!.trip.id,

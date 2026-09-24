@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Anchor, Info, MapPin, Train as TrainIcon, User, Wallet, X } from "lucide-react";
+import { AlarmClock, Anchor, Info, MapPin, Train as TrainIcon, User, Wallet, X } from "lucide-react";
 import { useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +126,23 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
               <span className="font-medium text-foreground">Arrivals</span> (Nairobi → MTM): 04:00
               (+1d Night Train), 14:00 Inter-County, 20:30 Express
             </p>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="flex items-center gap-1.5 text-base font-semibold">
+              <AlarmClock className="h-4 w-4" /> Pickup rules
+            </h3>
+            <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+              <li>
+                Every cab leaves its stage exactly <span className="font-medium text-foreground">2 hours before the train departs</span>{" "}
+                (e.g. cabs for the 08:00 train pull out at 06:00) — be at your stage by then.
+              </li>
+              <li>
+                The driver waits at most <span className="font-medium text-foreground">15 minutes</span> past
+                departure if you haven&apos;t arrived and haven&apos;t notified them — after that the cab
+                leaves and the no-show policy applies.
+              </li>
+            </ul>
           </section>
 
           <section className="space-y-1.5">

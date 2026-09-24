@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { runOperationalTick } from "@/lib/engine";
+import { runOperationalTick, CAB_LEAD_MINUTES } from "@/lib/engine";
+import { getConfig } from "@/lib/money";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
   const now = new Date();
+  const cfg = await getConfig();
 
   const trips = await db.trip.findMany({
     where: {
@@ -60,11 +62,19 @@ export async function GET(req: NextRequest) {
         charterPrice: t.route.charterPrice,
         direction: t.direction,
         departureAt: t.departureAt,
-        // TO_TERMINUS: when the cab reaches the terminus (before the train leaves).
+        // TO_TERMINUS: when the cab is scheduled to reach the terminus —
+        // cabs leave stages CAB_LEAD_MINUTES before the train (the pickup
+        // rule), so the train departs at departureAt + lead; the cab targets
+        // arriving terminusArrivalBufferMinutes before that.
         // FROM_TERMINUS: departureAt itself is the terminus departure.
         terminusAt: isFromTerminus
           ? t.departureAt
-          : new Date(t.departureAt.getTime() + t.route.durationMinutes * 60 * 1000),
+          : t.train && t.train.direction === "MBA_TO_NBO"
+            ? new Date(
+                t.departureAt.getTime() +
+                  (CAB_LEAD_MINUTES - cfg.terminusArrivalBufferMinutes) * 60 * 1000,
+              )
+            : new Date(t.departureAt.getTime() + t.route.durationMinutes * 60 * 1000),
         train,
         status: t.status,
         capacity: t.capacity,

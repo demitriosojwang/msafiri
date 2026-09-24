@@ -140,3 +140,22 @@ Work Log:
 
 Stage Summary:
 - The passenger payment system is confirmed fully operational in demo mode and genuinely plug-and-play: credentials arrive → paste into Admin → Payments or uncomment the .env block → Test connection → STK pushes, paybill confirmations, refunds and payouts run live against Daraja sandbox/production with zero code changes.
+
+---
+Task ID: 8
+Agent: Super Z (main agent)
+Task: Tahmeed-style guest booking + uniform 2h cab rule + 15-minute stage grace (user: "make an option for someone to actually book and pay for the seat as a guest like buses like tahmeed… cabs will always leave the pick up stages towards the terminus 2hrs before the time of departure of the trains… 15mins is the maximum time a passenger is given if not arrived at stage and not notified the driver").
+
+Work Log:
+- Schema: Booking gained passengerName + passengerPhone (normalized 2547XXXXXXXX via toMpesaMsISDN) — guest checkout details captured with no account. db push + generate OK.
+- Engine: TO_TERMINUS scheduling rewritten to the uniform rule — every stage's cab departs exactly CAB_LEAD_MINUTES (120) before its train's MTM departure regardless of route length (was: buffer + per-route duration staggering). Exported CAB_LEAD_MINUTES and STAGE_GRACE_MINUTES (15) constants. One-off script scripts/migrate-cab-2h-rule.ts rescheduled all 16 future TO_TERMINUS trips (08:00 train → 06:00 cabs, 15:00 → 13:00, 22:00 → 20:00, both routes).
+- Trips API: terminusAt for train-anchored TO_TERMINUS trips = departureAt + (CAB_LEAD − terminusArrivalBuffer) → "reaches MTM 07:00" for the 08:00 train stays honest under the new rule.
+- Guest checkout: POST /api/bookings validates name (≥2 chars) + M-Pesa phone server-side (curl-tested 400s for "123" and empty name); BookingSheet gained a "Your details — book as a guest, no account needed" card (name + M-Pesa number) gating the Reserve button, prefilled from localStorage (mireli.guest) for repeat bookings; PaySheet phone prefills from the booking's guest phone and labels the field with the passenger's name; receipt shows a Passenger row; booking-placed confirmation greets the guest by first name.
+- 15-min grace + 2h rule surfaced everywhere: booking sheet amber note ("Be at {stage} by 06:00 — cabs leave exactly 2 hours before the train… driver waits at most 15 minutes…"), My rides card note on active TO_TERMINUS bookings, cab cards now read "Leaves the stage 06:00 · be there by then" (from-terminus cards keep "Cab departs"), About sheet gained a "Pickup rules" section incl. the no-show consequence.
+- My rides cards + admin bookings now show the traveller (name + local-format phone); admin API returns a guest object.
+- Verified: src tsc clean, eslint clean on all 10 touched files; browser E2E 414×896 — booked tomorrow's 08:00 Inter-County from Nyali Center as guest "Amina Wanjiru" 0722890404: card said "Leaves the stage 06:00 · be there by then / reaches MTM 07:00", details gated reserve, credit checkbox → KSh 300 due, STK prefiled 254722890404 → receipt MR-5HV2Z6 (M-Pesa G8NW3XWTJQ) with Passenger row; My rides shows guest + amber stage deadline note; admin bookings shows "Traveller: Amina Wanjiru · +722890404 · Departure Fri, 25 Sept · 06:00"; API trips confirm all 6 tomorrow TO_TERMINUS cabs at 06:00/13:00/20:00; dev.log clean.
+- Screenshots: upload/guestbook-01…07.
+
+Stage Summary:
+- Booking is now fully Tahmeed-style: pick point → enter name + M-Pesa number → pay by STK/paybill → ticket, all without an account (invisible guest session still powers credit + history on the device).
+- Fleet-wide pickup policy is data-true everywhere passengers look: cabs leave stages 2h before train departure, 15-minute max wait without driver notification, then no-show tier.

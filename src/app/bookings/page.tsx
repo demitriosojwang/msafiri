@@ -33,6 +33,7 @@ import {
   MapPin,
   Ticket,
   TicketX,
+  UserRound,
 } from "lucide-react";
 
 interface BookingRow {
@@ -56,6 +57,8 @@ interface BookingRow {
   tripStatus: string | null;
   driver: { name: string; plate: string; cabType: string } | null;
   allocationNote: string | null;
+  passengerName: string | null;
+  passengerPhone: string | null;
   checkedInAt: string | null;
   lockNote: string | null;
   ledger: { status: string; cash: number; credit: number; receipt: string | null } | null;
@@ -238,6 +241,8 @@ export default function BookingsPage() {
             routeName: payFor.routeName,
             departureAt: payFor.departureAt,
             stageName: payFor.stageName,
+            passengerName: payFor.passengerName,
+            passengerPhone: payFor.passengerPhone,
           }}
           onPaid={load}
         />
@@ -335,6 +340,14 @@ function BookingCard({
             {b.allocationNote && !b.driver && (
               <p className="mt-0.5 text-xs text-muted-foreground">{b.allocationNote}</p>
             )}
+            {b.passengerName && (
+              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <UserRound className="h-4 w-4" /> {b.passengerName}
+                {b.passengerPhone && (
+                  <span className="font-mono text-xs">· +{b.passengerPhone.replace(/^(254)/, "")}</span>
+                )}
+              </p>
+            )}
           </div>
           <div className="text-right text-sm">
             <p className="font-semibold">{ksh(b.fareAmount)}</p>
@@ -347,6 +360,14 @@ function BookingCard({
 
         {b.lockNote && b.status === "confirmed" && (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{b.lockNote}</p>
+        )}
+
+        {b.direction === "TO_TERMINUS" && b.departureAt &&
+          ["awaiting_payment", "confirmed", "boarded"].includes(b.status) && (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <b>Be at the stage by {fmtTime(b.departureAt)}</b> — cabs leave 2h before the train and
+            wait at most 15 minutes if you haven&apos;t notified the driver.
+          </p>
         )}
 
         <div className="flex flex-wrap gap-2">

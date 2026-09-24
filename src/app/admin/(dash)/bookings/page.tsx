@@ -24,6 +24,7 @@ interface AdminBooking {
   id: string;
   code: string;
   passenger: { name: string | null; phone: string };
+  guest: { name: string; phone: string | null } | null;
   routeName: string | null;
   direction: string;
   stageName: string | null;
@@ -142,6 +143,12 @@ export default function AdminBookings() {
                     {b.passenger.name || b.passenger.phone} · {b.routeName || "—"} · {b.stageName}
                     {b.homePickup ? " (door)" : ""} · {b.isCharter ? "whole cab" : `${b.seats} seat(s)`}
                   </p>
+                  {b.guest && (
+                    <p className="text-xs text-muted-foreground">
+                      Traveller: {b.guest.name}
+                      {b.guest.phone ? ` · +${b.guest.phone.replace(/^(254)/, "")}` : ""}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Departure {fmtDateTime(b.departureAt)} · trip {b.tripStatus || "unallocated"}
                     {b.driver ? ` · ${b.driver.name} (${b.driver.plate})` : ""}

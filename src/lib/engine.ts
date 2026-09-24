@@ -14,11 +14,22 @@ import { audit } from "@/lib/audit";
 // Every feeder cab is anchored to a Madaraka Express event at Mombasa
 // Terminus (MTM), per the official timetable (MTM/NTM times):
 //   · Trains DEPARTING MTM (Inter-County 08:00 · Express 15:00 · Night 22:00)
-//     → TO_TERMINUS shuttles pick up along the coast and reach MTM at least
-//       `terminusArrivalBufferMinutes` before departure.
+//     → TO_TERMINUS shuttles leave their stages exactly CAB_LEAD_MINUTES
+//       before train departure (e.g. the 08:00 train is caught by cabs that
+//       pull out of every stage at 06:00). Passengers must be at the stage by
+//       then; the cab waits at most STAGE_GRACE_MINUTES for someone who has
+//       not arrived and has not notified the driver.
 //   · Trains ARRIVING MTM (Inter-County 14:00 · Express 20:30 · Night 03:55)
 //     → FROM_TERMINUS shuttles leave MTM `trainMeetBufferMinutes` after
 //       arrival, dropping passengers at their chosen drop-off points.
+
+/** User rule: every pickup-stage cab departs exactly 2h before its train. */
+export const CAB_LEAD_MINUTES = 120;
+
+/** User rule: max minutes a cab waits past departure for a passenger who has
+ *  neither arrived at the stage nor notified the driver. After that the cab
+ *  leaves and the booking lands in the no-show tier. */
+export const STAGE_GRACE_MINUTES = 15;
 
 function parseHHMM(hhmm: string): { h: number; m: number } {
   const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
@@ -58,11 +69,11 @@ export async function ensureTrips(): Promise<number> {
   for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
     for (const train of trains) {
       if (train.direction === "MBA_TO_NBO") {
-        // Departure event at MTM → coast pickups must reach the terminus early
+        // Departure event at MTM → every stage's cab pulls out exactly 2h
+        // before the train leaves, regardless of route length.
         const trainDep = dayAt(now, dayOffset, train.originTime);
-        const terminusAt = new Date(trainDep.getTime() - cfg.terminusArrivalBufferMinutes * 60 * 1000);
+        const dep = new Date(trainDep.getTime() - CAB_LEAD_MINUTES * 60 * 1000);
         for (const route of routes) {
-          const dep = new Date(terminusAt.getTime() - route.durationMinutes * 60 * 1000);
           if (dep.getTime() < now.getTime() - 30 * 60 * 1000) continue; // skip stale slots
           const exists = await db.trip.findFirst({
             where: { routeId: route.id, direction: "TO_TERMINUS", trainId: train.id, departureAt: dep },

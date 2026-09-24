@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
       id: b.id,
       code: b.code,
       passenger: { name: b.passenger.name, phone: b.passenger.phone },
+      guest: b.passengerName ? { name: b.passengerName, phone: b.passengerPhone } : null,
       routeName: b.trip?.route.name || null,
       direction: b.direction,
       stageName: b.stageName,

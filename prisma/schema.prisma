@@ -129,6 +129,10 @@ model Booking {
   cancelledAt   DateTime?
   checkedInAt   DateTime?
   allocationNote String?
+  // Guest checkout (Tahmeed-style): who is travelling, captured at booking
+  // time with no account needed. Phone doubles as the default M-Pesa number.
+  passengerName  String?
+  passengerPhone String? // normalized 2547XXXXXXXX
   ledgerEntry   LedgerEntry?
   refunds       RefundRecord[]
   mpesaTransactions MpesaTransaction[]

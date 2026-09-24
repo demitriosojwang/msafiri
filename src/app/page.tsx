@@ -629,7 +629,10 @@ function CabCard({
               </div>
             )}
             <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Clock className="h-3 w-3" /> Cab departs {fmtTime(trip.departureAt)}
+              <Clock className="h-3 w-3" />
+              {trip.direction === "TO_TERMINUS"
+                ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
+                : `Cab departs ${fmtTime(trip.departureAt)}`}
             </div>
           </div>
           <div className="shrink-0 text-right">

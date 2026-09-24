@@ -17,7 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { PaySheet } from "@/components/pay-sheet";
 import { api, useMe } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront } from "lucide-react";
+import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
 export interface Stage {
@@ -76,8 +76,29 @@ interface CreateResponse {
     cashDue: number;
     stageName: string;
     allocationNote: string | null;
+    passengerName: string | null;
+    passengerPhone: string | null;
     trip: { departureAt: string; routeName: string; driver: { name: string } | null } | null;
   };
+}
+
+/** Tahmeed-style guest checkout: the last details typed on this device prefill
+ *  the next booking — convenience only, never an account. */
+const GUEST_KEY = "mireli.guest";
+
+function loadGuest(): { name: string; phone: string } {
+  if (typeof window === "undefined") return { name: "", phone: "" };
+  try {
+    const raw = window.localStorage.getItem(GUEST_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { name: "", phone: "" };
+}
+
+/** Loose client-side check mirroring the server's toMpesaMsISDN. */
+function isValidMpesaPhone(input: string): boolean {
+  const d = input.replace(/\D/g, "");
+  return /^(?:254|0)?(?:7|1)\d{8}$/.test(d);
 }
 
 export function BookingSheet({
@@ -101,6 +122,8 @@ export function BookingSheet({
 
   const { me } = useMe();
   const creditBalance = me?.creditBalance || 0;
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
 
   useEffect(() => {
     if (open && draft) {
@@ -109,6 +132,9 @@ export function BookingSheet({
       setError(null);
       setCreated(null);
       setPayOpen(false);
+      const g = loadGuest();
+      setGuestName(g.name || "");
+      setGuestPhone(g.phone || "");
     }
   }, [open, draft]);
 
@@ -120,9 +146,10 @@ export function BookingSheet({
   const total = fare + surcharge;
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
+  const guestDetailsOk = guestName.trim().length >= 2 && isValidMpesaPhone(guestPhone);
 
   async function confirm() {
-    if (!trip || !draft) return;
+    if (!trip || !draft || !guestDetailsOk) return;
     setBusy(true);
     setError(null);
     try {
@@ -137,8 +164,13 @@ export function BookingSheet({
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
           travelDate: trip.departureAt.slice(0, 10),
+          passengerName: guestName.trim(),
+          passengerPhone: guestPhone,
         },
       });
+      try {
+        window.localStorage.setItem(GUEST_KEY, JSON.stringify({ name: guestName.trim(), phone: guestPhone }));
+      } catch {}
       setCreated(res.booking);
       await refresh();
       onBooked();
@@ -202,8 +234,8 @@ export function BookingSheet({
                 <h3 className="text-lg font-semibold">Booking {created.code} placed!</h3>
                 <p className="max-w-xs text-sm text-muted-foreground">
                   {created.cashDue > 0
-                    ? "Complete the M-Pesa payment to confirm your seat."
-                    : "Fully covered by your travel credit — your seat is confirmed."}
+                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm your seat.`
+                    : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
               <div className="rounded-lg border bg-muted/40 p-3 text-sm">
@@ -272,6 +304,17 @@ export function BookingSheet({
                 </div>
               </div>
 
+              {/* Stage arrival rule — cabs leave stages 2h before the train,
+                  waiting at most 15 min for a silent passenger. */}
+              {trip.direction === "TO_TERMINUS" && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+                  <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  <span>
+                    Be at <b>{stage?.name || "your stage"}</b> by <b>{fmtTime(trip.departureAt)}</b> — cabs leave exactly 2 hours before the train. The driver waits at most 15 minutes if you haven&apos;t arrived and haven&apos;t notified them; after that the seat travels without you.
+                  </span>
+                </div>
+              )}
+
               {draft.homePickup && (
                 <div className="space-y-1.5">
                   <Label htmlFor="draft-address" className="flex items-center gap-1 text-xs">
@@ -286,6 +329,34 @@ export function BookingSheet({
                   />
                 </div>
               )}
+
+              {/* Guest checkout — who is travelling? No account needed. */}
+              <div className="space-y-2 rounded-lg border bg-card p-3">
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-1 text-xs">
+                    <UserRound className="h-3 w-3" /> Your details
+                  </Label>
+                  <span className="text-[10px] text-muted-foreground">book as a guest — no account needed</span>
+                </div>
+                <Input
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  placeholder="Full name (as the driver should know you)"
+                  className="h-9"
+                  autoComplete="name"
+                />
+                <Input
+                  value={guestPhone}
+                  onChange={(e) => setGuestPhone(e.target.value)}
+                  placeholder="M-Pesa number · 07XX XXX XXX"
+                  inputMode="tel"
+                  className="h-9"
+                  autoComplete="tel"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  We reach this number with the M-Pesa prompt and pickup updates. Your name goes on the seat list the driver sees.
+                </p>
+              </div>
 
               {/* Fare breakdown */}
               <div className="space-y-1.5 rounded-lg border bg-card p-3 text-xs">
@@ -331,7 +402,7 @@ export function BookingSheet({
 
           {!created && (
             <SheetFooter className="px-4 pb-4">
-              <Button className="h-11 w-full" disabled={busy || !draft.stageId} onClick={confirm}>
+              <Button className="h-11 w-full" disabled={busy || !draft.stageId || !guestDetailsOk} onClick={confirm}>
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : isCharter ? (
@@ -359,6 +430,8 @@ export function BookingSheet({
             routeName: created.trip?.routeName,
             departureAt: created.trip?.departureAt,
             stageName: created.stageName,
+            passengerName: created.passengerName,
+            passengerPhone: created.passengerPhone,
           }}
           onPaid={onBooked}
         />

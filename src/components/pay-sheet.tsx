@@ -23,7 +23,16 @@ import {
 interface PaySheetProps {
   open: boolean;
   onClose: () => void;
-  booking: { id: string; code: string; cashDue: number; routeName?: string | null; departureAt?: string | null; stageName?: string | null };
+  booking: {
+    id: string;
+    code: string;
+    cashDue: number;
+    routeName?: string | null;
+    departureAt?: string | null;
+    stageName?: string | null;
+    passengerName?: string | null; // guest checkout details
+    passengerPhone?: string | null;
+  };
   onPaid: () => void;
 }
 
@@ -44,7 +53,8 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
     if (open) {
       setMethod("stk");
       setStep("phone");
-      setPhone("");
+      // Prefill from the guest's booking details (Tahmeed-style checkout).
+      setPhone(booking.passengerPhone || "");
       setError(null);
       setReceipt(null);
       setCopied(null);
@@ -142,7 +152,7 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
             </SheetHeader>
             <div className="space-y-4 px-4 pb-4">
               <div className="space-y-2">
-                <Label htmlFor="mpesa-phone">M-Pesa number</Label>
+                <Label htmlFor="mpesa-phone">M-Pesa number {booking.passengerName ? `· ${booking.passengerName}` : ""}</Label>
                 <Input
                   id="mpesa-phone"
                   placeholder="07XX XXX XXX or 2547XX XXX XXX"
@@ -272,6 +282,12 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
                 </p>
                 <Separator className="my-3" />
                 <div className="grid grid-cols-2 gap-2">
+                  {booking.passengerName && (
+                    <>
+                      <span className="text-muted-foreground">Passenger</span>
+                      <span className="text-right font-medium">{booking.passengerName}</span>
+                    </>
+                  )}
                   <span className="text-muted-foreground">M-Pesa code</span>
                   <span className="text-right font-mono font-medium">{receipt.receipt}</span>
                   <span className="text-muted-foreground">Amount paid</span>
