@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, useMe } from "@/lib/client";
-import { fmtPhone, fmtTime, ksh } from "@/lib/format";
+import { fmtTime, ksh } from "@/lib/format";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -642,14 +642,6 @@ function CabCard({
                 <Stars rating={trip.driver.rating} />
                 <span className="text-muted-foreground/50">•</span>
                 <span className="font-mono">{trip.driver.plate}</span>
-                {trip.driver.phone && (
-                  <>
-                    <span className="text-muted-foreground/50">•</span>
-                    <a href={`tel:${trip.driver.phone}`} className="font-mono text-primary underline-offset-2 hover:underline">
-                      {fmtPhone(trip.driver.phone)}
-                    </a>
-                  </>
-                )}
               </div>
             )}
             <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
