@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { PaySheet } from "@/components/pay-sheet";
 import { api, useMe } from "@/lib/client";
-import { ksh, fmtTime } from "@/lib/format";
+import { ksh, fmtTime, fmtPhone } from "@/lib/format";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -52,7 +52,7 @@ export interface BookableTrip {
   stages: Stage[];
   pointsLabel: "drop-off" | "pickup";
   minFare: number;
-  driver: { name: string; plate: string; cabType: string; rating: number } | null;
+  driver: { name: string; plate: string; cabType: string; rating: number; phone?: string } | null;
 }
 
 /** Everything the main view collected before the sheet opens. */
@@ -207,8 +207,15 @@ export function BookingSheet({
                   {trip.driver && <Stars rating={trip.driver.rating} />}
                   {trip.driver && <span className="text-muted-foreground/50">•</span>}
                   {trip.driver && <span className="font-mono text-xs">{trip.driver.plate}</span>}
-                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
-                  <DotBadge status={trip.status} />
+                  {trip.driver?.phone && (
+                    <>
+                      <span className="text-muted-foreground/50">•</span>
+                      <a href={`tel:${trip.driver.phone}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
+                        {fmtPhone(trip.driver.phone)}
+                      </a>
+                    </>
+                  )}
+                  {!trip.driver && <DotBadge status={trip.status} />}
                 </SheetDescription>
               </div>
               <div className="shrink-0 text-right">

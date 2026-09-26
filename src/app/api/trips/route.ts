@@ -81,7 +81,15 @@ export async function GET(req: NextRequest) {
         seatsLeft,
         bookable: ["scheduled", "locked"].includes(t.status) && seatsLeft > 0 && t.departureAt > now,
         lockNote: t.status === "locked" ? "Bookings locked — late cancellation converts fare to credit" : null,
-        driver: t.driver ? { name: t.driver.name, plate: t.driver.plate, cabType: t.driver.cabType, rating: t.driver.rating } : null,
+        driver: t.driver
+          ? {
+              name: t.driver.name,
+              plate: t.driver.plate,
+              cabType: t.driver.cabType,
+              rating: t.driver.rating,
+              phone: t.driver.phone, // passenger-facing contact
+            }
+          : null,
         stages,
         // FROM_TERMINUS exposes drop-off points; TO_TERMINUS exposes pickup points
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",

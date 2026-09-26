@@ -40,7 +40,7 @@ export async function GET() {
       createdAt: b.createdAt,
       departureAt: b.trip?.departureAt || null,
       tripStatus: b.trip?.status || null,
-      driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate, cabType: b.trip.driver.cabType } : null,
+      driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate, cabType: b.trip.driver.cabType, phone: b.trip.driver.phone } : null,
       allocationNote: b.allocationNote,
       passengerName: b.passengerName,
       passengerPhone: b.passengerPhone,
@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
             departureAt: fresh!.trip.departureAt,
             status: fresh!.trip.status,
             routeName: fresh!.trip.route.name,
-            driver: fresh!.trip.driver ? { name: fresh!.trip.driver.name, plate: fresh!.trip.driver.plate } : null,
+            driver: fresh!.trip.driver ? { name: fresh!.trip.driver.name, plate: fresh!.trip.driver.plate, phone: fresh!.trip.driver.phone } : null,
           }
         : null,
       allocationNote: fresh!.allocationNote,

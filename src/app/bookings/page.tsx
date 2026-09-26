@@ -20,7 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { api, useMe } from "@/lib/client";
-import { fmtDateTime, fmtTime, ksh, TIER_LABELS } from "@/lib/format";
+import { fmtDateTime, fmtPhone, fmtTime, ksh, TIER_LABELS } from "@/lib/format";
 import {
   Banknote,
   CalendarClock,
@@ -55,7 +55,7 @@ interface BookingRow {
   createdAt: string;
   departureAt: string | null;
   tripStatus: string | null;
-  driver: { name: string; plate: string; cabType: string } | null;
+  driver: { name: string; plate: string; cabType: string; phone?: string | null } | null;
   allocationNote: string | null;
   passengerName: string | null;
   passengerPhone: string | null;
@@ -333,8 +333,13 @@ function BookingCard({
               {b.homePickup && <Home className="h-3.5 w-3.5" />}
             </p>
             {b.driver && (
-              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
                 <Car className="h-4 w-4" /> {b.driver.name} · {b.driver.plate}
+                {b.driver.phone && (
+                  <a href={`tel:${b.driver.phone}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
+                    {fmtPhone(b.driver.phone)}
+                  </a>
+                )}
               </p>
             )}
             {b.allocationNote && !b.driver && (

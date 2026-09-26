@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, useMe } from "@/lib/client";
-import { fmtTime, ksh } from "@/lib/format";
+import { fmtPhone, fmtTime, ksh } from "@/lib/format";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -58,7 +58,7 @@ interface BookingRow {
   cashDue: number;
   isCharter: boolean;
   departureAt: string | null;
-  driver: { name: string; plate: string } | null;
+  driver: { name: string; plate: string; phone?: string | null } | null;
 }
 
 interface TrainRow {
@@ -214,6 +214,17 @@ export default function Home() {
     if (pointId) list = list.filter((t) => t.stages.some((s) => s.id === pointId));
     return list;
   }, [trips, trainKey, pointId]);
+
+  // How many seats can actually be booked on the cabs currently listed?
+  const seatCap = useMemo(() => {
+    if (loading || !visibleTrips.length) return 14;
+    const maxLeft = Math.max(...visibleTrips.map((t) => Math.max(t.seatsLeft, 0)));
+    return Math.max(1, Math.min(14, maxLeft || 14));
+  }, [loading, visibleTrips]);
+
+  useEffect(() => {
+    if (!loading && seats > seatCap) setSeats(seatCap);
+  }, [loading, seatCap, seats]);
 
   // Live fare preview
   const previewStage = selectedPoint?.point;
@@ -434,7 +445,12 @@ export default function Home() {
                 <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> How many seats?
                 </div>
-                <SeatStepper value={seats} onChange={setSeats} min={1} max={14} />
+                <SeatStepper value={seats} onChange={setSeats} min={1} max={seatCap} />
+                {!loading && visibleTrips.length > 0 && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Up to {seatCap} {seatCap === 1 ? "seat" : "seats"} can be booked on the cabs listed below.
+                  </p>
+                )}
               </div>
             )}
 
@@ -621,11 +637,19 @@ function CabCard({
               )}
             </div>
             {trip.driver && (
-              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>{trip.driver.name}</span>
                 <Stars rating={trip.driver.rating} />
                 <span className="text-muted-foreground/50">•</span>
                 <span className="font-mono">{trip.driver.plate}</span>
+                {trip.driver.phone && (
+                  <>
+                    <span className="text-muted-foreground/50">•</span>
+                    <a href={`tel:${trip.driver.phone}`} className="font-mono text-primary underline-offset-2 hover:underline">
+                      {fmtPhone(trip.driver.phone)}
+                    </a>
+                  </>
+                )}
               </div>
             )}
             <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">

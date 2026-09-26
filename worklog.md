@@ -159,3 +159,18 @@ Work Log:
 Stage Summary:
 - Booking is now fully Tahmeed-style: pick point → enter name + M-Pesa number → pay by STK/paybill → ticket, all without an account (invisible guest session still powers credit + history on the device).
 - Fleet-wide pickup policy is data-true everywhere passengers look: cabs leave stages 2h before train departure, 15-minute max wait without driver notification, then no-show tier.
+
+---
+Task ID: 9
+Agent: Super Z (main agent)
+Task: Pre-booking answers audit — user asked whether the site answers 6 passenger questions (date, train, pickup/drop-off, seats, charter, driver name+contact); fixed the two gaps found.
+
+Work Log:
+- Audited all six: date ✅ (Today/Tomorrow/Pick-date pills + selected date), train ✅ (pills with service names, "Catches/Meets the {train} · MTM {time}" chips, train card in sheet), pickup/drop-off ✅ (point grid grouped North/South with fares + door surcharges, door-to-door toggle + address field), seats ⚠️ (stepper was static 1–14, no visible availability answer), charter ✅ (toggle + charter price + "Book charter" CTA + Private charter badge), driver contact ⚠️ (name + plate shown but phone was never exposed to passengers).
+- Gap 1 — driver contact: trips API + bookings GET/POST now expose driver.phone; new fmtPhone() in format.ts (+254712345001 → 0712 345 001); driver phone now a tappable tel: link on cab cards, booking sheet header (4.8 • KDF 662K • 0712 345 003), and My rides driver line.
+- Gap 2 — seats: seatCap memo over visibleTrips (max seatsLeft, clamp 1–14) now caps the stepper, auto-clamps the chosen count when availability drops, and shows "Up to N seats can be booked on the cabs listed below." under the stepper.
+- Verified: tsc + eslint clean on all 6 touched files; browser 414×896 — cab cards show "Fatuma Ali · ★4.8 • KDF 662K • 0712 345 003" links, hint "Up to 13 seats can be booked on the cabs listed below.", booking sheet header carries the phone chip; dev.log clean.
+- Screenshots: upload/audit-01…02.
+
+Stage Summary:
+- All six pre-booking questions are now answered on the passenger surface: date, train (with service name), pickup/drop-off (points + door-to-door), how many seats (capped stepper + availability hint), whole-cab charter, and driver name + plate + tap-to-call phone.

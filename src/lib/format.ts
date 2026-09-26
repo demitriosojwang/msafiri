@@ -51,3 +51,11 @@ export const TIER_LABELS: Record<string, string> = {
 export function dirLabel(direction: string): string {
   return direction === "FROM_TERMINUS" ? "Terminus → Stage" : "Stage → Terminus";
 }
+
+/** +254712345001 / 0712345001 → 0712 345 001 (Kenyan local style). */
+export function fmtPhone(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  const local = digits.startsWith("254") ? `0${digits.slice(3)}` : digits.startsWith("0") ? digits : `0${digits}`;
+  return local.replace(/^(\d{4})(\d{3})(\d{3})$/, "$1 $2 $3");
+}
