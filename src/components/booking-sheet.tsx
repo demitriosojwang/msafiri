@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { PaySheet } from "@/components/pay-sheet";
 import { api, useMe } from "@/lib/client";
-import { ksh, fmtTime, fmtPhone } from "@/lib/format";
+import { ksh, fmtTime } from "@/lib/format";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -52,7 +52,7 @@ export interface BookableTrip {
   stages: Stage[];
   pointsLabel: "drop-off" | "pickup";
   minFare: number;
-  driver: { name: string; plate: string; cabType: string; rating: number; phone?: string } | null;
+  driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
 /** Everything the main view collected before the sheet opens. */
@@ -78,7 +78,11 @@ interface CreateResponse {
     allocationNote: string | null;
     passengerName: string | null;
     passengerPhone: string | null;
-    trip: { departureAt: string; routeName: string; driver: { name: string } | null } | null;
+    trip: {
+      departureAt: string;
+      routeName: string;
+      driver: { name: string; plate?: string | null; phone?: string | null } | null;
+    } | null;
   };
 }
 
@@ -207,15 +211,8 @@ export function BookingSheet({
                   {trip.driver && <Stars rating={trip.driver.rating} />}
                   {trip.driver && <span className="text-muted-foreground/50">•</span>}
                   {trip.driver && <span className="font-mono text-xs">{trip.driver.plate}</span>}
-                  {trip.driver?.phone && (
-                    <>
-                      <span className="text-muted-foreground/50">•</span>
-                      <a href={`tel:${trip.driver.phone}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
-                        {fmtPhone(trip.driver.phone)}
-                      </a>
-                    </>
-                  )}
-                  {!trip.driver && <DotBadge status={trip.status} />}
+                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
+                  <DotBadge status={trip.status} />
                 </SheetDescription>
               </div>
               <div className="shrink-0 text-right">
@@ -439,6 +436,9 @@ export function BookingSheet({
             stageName: created.stageName,
             passengerName: created.passengerName,
             passengerPhone: created.passengerPhone,
+            driver: created.trip?.driver
+              ? { name: created.trip.driver.name, plate: created.trip.driver.plate, phone: created.trip.driver.phone }
+              : null,
           }}
           onPaid={onBooked}
         />

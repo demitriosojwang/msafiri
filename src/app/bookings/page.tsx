@@ -243,6 +243,9 @@ export default function BookingsPage() {
             stageName: payFor.stageName,
             passengerName: payFor.passengerName,
             passengerPhone: payFor.passengerPhone,
+            driver: payFor.driver
+              ? { name: payFor.driver.name, plate: payFor.driver.plate, phone: payFor.driver.phone }
+              : null,
           }}
           onPaid={load}
         />

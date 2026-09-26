@@ -40,7 +40,17 @@ export async function GET() {
       createdAt: b.createdAt,
       departureAt: b.trip?.departureAt || null,
       tripStatus: b.trip?.status || null,
-      driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate, cabType: b.trip.driver.cabType, phone: b.trip.driver.phone } : null,
+      // Driver phone unlocks once the fare is settled (paid or credit-covered);
+      // identity (name + plate) is visible from the start.
+      driver:
+        b.trip?.driver
+          ? {
+              name: b.trip.driver.name,
+              plate: b.trip.driver.plate,
+              cabType: b.trip.driver.cabType,
+              phone: ["confirmed", "boarded", "completed"].includes(b.status) ? b.trip.driver.phone : null,
+            }
+          : null,
       allocationNote: b.allocationNote,
       passengerName: b.passengerName,
       passengerPhone: b.passengerPhone,
@@ -214,7 +224,16 @@ export async function POST(req: NextRequest) {
             departureAt: fresh!.trip.departureAt,
             status: fresh!.trip.status,
             routeName: fresh!.trip.route.name,
-            driver: fresh!.trip.driver ? { name: fresh!.trip.driver.name, plate: fresh!.trip.driver.plate, phone: fresh!.trip.driver.phone } : null,
+            driver: fresh!.trip.driver
+              ? {
+                  name: fresh!.trip.driver.name,
+                  plate: fresh!.trip.driver.plate,
+                  // Phone only once the fare is settled (e.g. credit-covered).
+                  phone: ["confirmed", "boarded", "completed"].includes(fresh!.status)
+                    ? fresh!.trip.driver.phone
+                    : null,
+                }
+              : null,
           }
         : null,
       allocationNote: fresh!.allocationNote,

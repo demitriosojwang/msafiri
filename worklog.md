@@ -174,3 +174,17 @@ Work Log:
 
 Stage Summary:
 - All six pre-booking questions are now answered on the passenger surface: date, train (with service name), pickup/drop-off (points + door-to-door), how many seats (capped stepper + availability hint), whole-cab charter, and driver name + plate + tap-to-call phone.
+
+---
+Task ID: 10
+Agent: Super Z (main agent)
+Task: Gate driver contact behind payment to protect drivers from spam (user: "reveal contact only after payment to protect drivers from spam").
+
+Work Log:
+- API gates (server-side, not just hidden UI): trips API no longer exposes driver.phone at all (pre-booking browsing); /api/bookings GET + POST include phone only when the booking status is settled (confirmed | boarded | completed — paid by M-Pesa or covered by credit); the verify action (/api/bookings/[id]) now returns a driverContact object (name + plate + phone) in all three success branches (already-confirmed, demo paybill, STK query success) — payment settling is exactly the unlock moment. booking fetch there now includes trip.driver.
+- UI: cab cards + booking sheet header show only identity (name · rating · plate) — phone chip removed from the pre-payment booking sheet; PaySheet receipt gained a "Your driver" row with a tap-to-call fmtPhone link, populated from booking.driver (credit-covered case) or the verify response (cash case); My rides driver line renders the phone only when the API includes it (gated).
+- Verified: tsc + eslint clean on all 7 touched files; browser 414×896 — cab cards contain zero phone numbers; booked tomorrow's 08:00 Inter-County as guest "Baraka Mwenda" → STK → receipt MR-RB6GKJ shows "Your driver: Fatuma Ali · 0712 345 003" unlocked; My rides confirmed booking shows the same tap-to-call link; curl gate test — trips driver has no phone field, freshly created unpaid booking returns driver.phone=null; test booking cancelled (voided_unpaid); dev.log clean.
+- Screenshots: upload/gated-01.
+
+Stage Summary:
+- Driver identity (name + plate + rating) answers "who picks me up" from the first glance, while the actual phone number unlocks only with the receipt — protecting drivers from spam while keeping paid passengers fully reachable.

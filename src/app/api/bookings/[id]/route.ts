@@ -56,12 +56,18 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const booking = await db.booking.findUnique({
     where: { id },
-    include: { ledgerEntry: true, trip: true },
+    include: { ledgerEntry: true, trip: { include: { driver: true } } },
   });
   if (!booking || booking.passengerId !== session.id) {
     return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   }
   const actor = { id: session.id, name: session.name, role: "passenger" as const };
+
+  /** Driver contact is revealed with the receipt once the fare is settled. */
+  const driverContact = () =>
+    booking.trip?.driver
+      ? { name: booking.trip.driver.name, plate: booking.trip.driver.plate, phone: booking.trip.driver.phone }
+      : null;
 
   // ── Pay: initiate STK push for the residual cash ──────────────────────────
   if (action === "pay") {
@@ -129,7 +135,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!tx) {
       // Maybe already confirmed (sweep or webhook got there first)
       if (booking.status === "confirmed" && booking.ledgerEntry) {
-        return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt });
+        return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt, driver: driverContact() });
       }
       const creds = await daraja.resolveDaraja();
       if (creds.mode === "mock") {
@@ -149,7 +155,7 @@ export async function POST(req: NextRequest, { params }: Params) {
           },
         });
         await confirmBookingPayment(booking.id, { receipt, checkoutRequestId: `pb-${booking.code}` });
-        return NextResponse.json({ ok: true, receipt, amount: booking.cashDue });
+        return NextResponse.json({ ok: true, receipt, amount: booking.cashDue, driver: driverContact() });
       }
       return NextResponse.json(
         { error: "We can't see your payment yet — it usually lands within a minute. Try again shortly." },
@@ -195,6 +201,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       amount: booking.cashDue,
       status: fresh?.status,
       ledgerStatus: fresh?.ledgerEntry?.status,
+      driver: driverContact(),
     });
   }
 

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ksh } from "@/lib/format";
+import { ksh, fmtPhone } from "@/lib/format";
 import { api } from "@/lib/client";
 import {
   Check,
@@ -20,6 +20,12 @@ import {
   Smartphone,
 } from "lucide-react";
 
+interface DriverContact {
+  name: string;
+  plate?: string | null;
+  phone?: string | null;
+}
+
 interface PaySheetProps {
   open: boolean;
   onClose: () => void;
@@ -32,6 +38,7 @@ interface PaySheetProps {
     stageName?: string | null;
     passengerName?: string | null; // guest checkout details
     passengerPhone?: string | null;
+    driver?: DriverContact | null; // phone present only when already settled
   };
   onPaid: () => void;
 }
@@ -47,6 +54,7 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ receipt: string; amount: number } | null>(null);
+  const [driver, setDriver] = useState<DriverContact | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,6 +65,7 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
       setPhone(booking.passengerPhone || "");
       setError(null);
       setReceipt(null);
+      setDriver(booking.driver ?? null);
       setCopied(null);
       // Which payment options are live? Paybill appears once the platform's
       // shortcode is configured (Admin → Payments).
@@ -88,14 +97,17 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
   }
 
   /** Verify works for both options: STK polls the push result; Paybill checks
-   *  for the landing payment (demo mode confirms, live waits for the webhook). */
+   *  for the landing payment (demo mode confirms, live waits for the webhook).
+   *  The verify response unlocks the driver's contact for the receipt. */
   async function verify() {
     setStep("verifying");
     try {
-      const res = await api<{ receipt: string; amount: number }>(`/api/bookings/${booking.id}`, {
-        body: { action: "verify" },
-      });
+      const res = await api<{ receipt: string; amount: number; driver?: DriverContact | null }>(
+        `/api/bookings/${booking.id}`,
+        { body: { action: "verify" } },
+      );
       setReceipt({ receipt: res.receipt, amount: res.amount });
+      if (res.driver) setDriver(res.driver);
       setStep("done");
       onPaid();
     } catch (e) {
@@ -286,6 +298,22 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
                     <>
                       <span className="text-muted-foreground">Passenger</span>
                       <span className="text-right font-medium">{booking.passengerName}</span>
+                    </>
+                  )}
+                  {driver && (
+                    <>
+                      <span className="text-muted-foreground">Your driver</span>
+                      <span className="text-right font-medium">
+                        {driver.name}
+                        {driver.phone && (
+                          <a
+                            href={`tel:${driver.phone}`}
+                            className="block font-mono text-xs text-primary underline-offset-2 hover:underline"
+                          >
+                            {fmtPhone(driver.phone)}
+                          </a>
+                        )}
+                      </span>
                     </>
                   )}
                   <span className="text-muted-foreground">M-Pesa code</span>

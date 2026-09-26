@@ -81,13 +81,14 @@ export async function GET(req: NextRequest) {
         seatsLeft,
         bookable: ["scheduled", "locked"].includes(t.status) && seatsLeft > 0 && t.departureAt > now,
         lockNote: t.status === "locked" ? "Bookings locked — late cancellation converts fare to credit" : null,
+        // Driver identity is public; the phone number is only revealed after
+        // payment (see /api/bookings) to protect drivers from spam calls.
         driver: t.driver
           ? {
               name: t.driver.name,
               plate: t.driver.plate,
               cabType: t.driver.cabType,
               rating: t.driver.rating,
-              phone: t.driver.phone, // passenger-facing contact
             }
           : null,
         stages,
