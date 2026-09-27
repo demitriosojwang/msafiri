@@ -188,12 +188,14 @@ export async function allocateBooking(params: {
 
   for (const t of candidates) {
     if (params.charter) {
-      // Charter = the whole cab: only a completely empty trip qualifies
-      if (t.bookedSeats === 0) {
-        await db.trip.update({
-          where: { id: t.id },
-          data: { bookedSeats: t.capacity },
-        });
+      // Charter = the whole cab: only a completely empty trip qualifies.
+      // Atomic claim — the WHERE clause re-checks bookedSeats === 0 at write
+      // time, so two concurrent charters can never grab the same cab.
+      const claimed = await db.trip.updateMany({
+        where: { id: t.id, bookedSeats: 0, status: { in: ["scheduled", "locked"] } },
+        data: { bookedSeats: t.capacity },
+      });
+      if (claimed.count === 1) {
         await db.booking.update({
           where: { id: params.bookingId },
           data: { tripId: t.id, allocationNote: `Charter — whole cab allocated (${t.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"})` },
@@ -202,17 +204,23 @@ export async function allocateBooking(params: {
       }
       continue;
     }
-    if (t.bookedSeats + params.seats <= t.capacity) {
-      await db.trip.update({
-        where: { id: t.id },
-        data: { bookedSeats: { increment: params.seats } },
-      });
+    // Atomic capacity claim — the WHERE clause re-checks headroom at write
+    // time, so concurrent bookings can never push a trip over capacity even
+    // if they both read the same stale bookedSeats here.
+    const claimed = await db.trip.updateMany({
+      where: { id: t.id, bookedSeats: { lte: t.capacity - params.seats }, status: { in: ["scheduled", "locked"] } },
+      data: { bookedSeats: { increment: params.seats } },
+    });
+    if (claimed.count === 1) {
       await db.booking.update({
         where: { id: params.bookingId },
         data: { tripId: t.id, allocationNote: `Auto-allocated to ${t.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"} trip` },
       });
-      return { tripId: t.id, note: `Auto-allocated — ${t.capacity - t.bookedSeats - params.seats} seats left on that departure` };
+      const fresh = await db.trip.findUnique({ where: { id: t.id }, select: { bookedSeats: true, capacity: true } });
+      const left = fresh ? fresh.capacity - fresh.bookedSeats : 0;
+      return { tripId: t.id, note: `Auto-allocated — ${left} seat${left === 1 ? "" : "s"} left on that departure` };
     }
+    // Lost the race for this trip (someone else filled it) — try the next one.
   }
 
   // No scheduled capacity — try to spin up an extra trip with a free driver

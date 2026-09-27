@@ -105,8 +105,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Validate identifiers BEFORE touching Prisma — a missing/garbage id must be a
+  // clean 400, never a 500 from a Prisma validation error.
+  const routeIdStr = String(routeId ?? "").trim();
+  if (!routeIdStr) {
+    return NextResponse.json({ error: "Route is required" }, { status: 400 });
+  }
+  const travelDateDate =
+    typeof travelDate === "string" && travelDate.trim() !== ""
+      ? new Date(`${travelDate.trim()}T00:00:00`)
+      : new Date();
+  if (Number.isNaN(travelDateDate.getTime())) {
+    return NextResponse.json({ error: "Invalid travel date" }, { status: 400 });
+  }
+
   const cfg = await getConfig();
-  const route = await db.route.findUnique({ where: { id: routeId }, include: { stages: true } });
+  const route = await db.route.findUnique({ where: { id: routeIdStr }, include: { stages: true } });
   if (!route) return NextResponse.json({ error: "Route not found" }, { status: 400 });
   const stage = route.stages.find((s) => s.id === stageId);
   if (!stage) return NextResponse.json({ error: "Pickup stage required" }, { status: 400 });
@@ -155,7 +169,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Auto-allocation
-  const travelDateDate = travelDate ? new Date(`${travelDate}T00:00:00`) : new Date();
   const allocation = await allocateBooking({
     bookingId: booking.id,
     routeId: route.id,

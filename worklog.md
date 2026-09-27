@@ -188,3 +188,22 @@ Work Log:
 
 Stage Summary:
 - Driver identity (name + plate + rating) answers "who picks me up" from the first glance, while the actual phone number unlocks only with the receipt — protecting drivers from spam while keeping paid passengers fully reachable.
+
+---
+Task ID: 11
+Agent: Super Z (main agent)
+Task: Full codebase error audit and fixes (user: "check for errors in the codebase,,and fix them").
+
+Work Log:
+- Static checks: tsc --noEmit 0 errors, eslint src clean, prisma validate OK, next build OK (42/42 pages), dev.log free of runtime errors — all BEFORE fixes, establishing a healthy baseline.
+- NEW TOOLING: scripts/db-integrity-audit.ts (6 checks: overbooking, orphans, stale credits, ledger gaps, driverless trips, guest-contact coverage) and scripts/repair-trip-seat-counts.ts (recomputes bookedSeats from active bookings).
+- FIX 1 — 500 crash on POST /api/bookings: missing routeId hit PrismaClientValidationError (where.id=undefined) → returned raw 500. Now validates routeId + travelDate before any Prisma call; garbage input gets clean 400 ("Route is required" / "Invalid travel date").
+- FIX 2 — non-atomic seat allocation race (src/lib/engine.ts): check-then-increment let two concurrent bookings both pass the capacity read and overbook a trip. Replaced with atomic conditional updateMany (WHERE re-checks headroom / bookedSeats=0 for charters at write time); loser of a race falls through to the next candidate; "seats left" note now computed from a fresh read.
+- FIX 3 — cancelled seats never released (src/lib/money.ts): nothing decremented bookedSeats on any cancellation path, so every cancel permanently shrank a trip's capacity. Added releaseBookingSeats() (charters release the whole cab; guarded against negative counts and departed/completed trips) called in all 4 cancellation outcomes (void_unpaid, early/platform refund, admin_override, late→credit). Repair script found + fixed 2 trips already leaking seats in live data.
+- FIX 4 — charter counted as 1 seat in seatsLeft (src/app/api/trips/route.ts): a charter holds the entire cab (bookedSeats=capacity) but was weighted as seats=1, so a chartered trip still advertised 12/13 seats. Now weighted as full capacity; bookable flips false.
+- FIX 5 — voided bookings burned passenger credit (src/lib/money.ts): cancelling an unpaid booking that applied credit never restored creditApplied — the KSh 100 welcome credit vanished on void. Void path now restores credit via restoreCredit(); admin_override full-cash refunds restore the credit portion too (audit metadata records creditRestored).
+- E2E verification (curl + DB ground truth): missing routeId → 400; bad date → 400; guest booking 200 (allocated, driver assigned); pay→verify 200 (receipt ZSA6KTTFHU, driver phone unlocked post-payment); checkin 200; cancel quote + cancel 200; seat recovery 0→2→0; charter MR-XJLUTZ → allocated trip seatsLeft 0/bookable false → cancel → 13/true; credit restore: balance 100→0 (booking)→100 (cancel). tsc + eslint re-clean; build OK; browser smoke of / and /bookings (414×896) — zero page/console errors.
+- Data repairs applied: 2 trips' bookedSeats recomputed; burned welcome credit row restored to active/100.
+
+Stage Summary:
+- 5 real defects fixed (1 crash, 2 money/capacity leaks, 1 race condition, 1 display bug) + 2 audit/repair scripts added; all flows re-verified green and DB integrity clean. Codebase is crash-safe on malformed input, race-safe on allocation, and no longer leaks seats or passenger credit on cancellation.

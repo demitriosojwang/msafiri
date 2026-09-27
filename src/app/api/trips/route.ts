@@ -28,13 +28,15 @@ export async function GET(req: NextRequest) {
       route: { include: { stages: { orderBy: { order: "asc" } } } },
       driver: true,
       train: true,
-      bookings: { where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } }, select: { seats: true } },
+      bookings: { where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } }, select: { seats: true, isCharter: true } },
     },
   });
 
   return NextResponse.json({
     trips: trips.map((t) => {
-      const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
+      // A charter holds the entire cab (bookedSeats = capacity), not 1 seat —
+      // count it as full capacity or a chartered trip would still show seats.
+      const relevantBooked = t.bookings.reduce((s, b) => s + (b.isCharter ? t.capacity : b.seats), 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const stages = t.route.stages.map((s) => ({
         id: s.id,

@@ -186,6 +186,37 @@ export async function resolveRefundTier(bookingId: string): Promise<{
 
 const REFUND_METHOD_WINDOW_MS = 24 * 60 * 60 * 1000; // Reversal works in a short window
 
+/**
+ * Give the seats a cancelled booking was holding back to its trip.
+ * Without this, every cancellation permanently shrinks the trip's capacity —
+ * the released seat could never be sold again. Charters release the whole
+ * cab (bookedSeats was set to capacity at allocation). Guarded against
+ * going negative and against departed/completed trips (nothing to release).
+ */
+async function releaseBookingSeats(booking: {
+  tripId: string | null;
+  seats: number;
+  isCharter: boolean;
+}) {
+  if (!booking.tripId) return;
+  const trip = await db.trip.findUnique({
+    where: { id: booking.tripId },
+    select: { status: true },
+  });
+  if (!trip || !["scheduled", "locked"].includes(trip.status)) return;
+  if (booking.isCharter) {
+    await db.trip.update({
+      where: { id: booking.tripId },
+      data: { bookedSeats: 0 },
+    });
+  } else {
+    await db.trip.updateMany({
+      where: { id: booking.tripId, bookedSeats: { gte: booking.seats } },
+      data: { bookedSeats: { decrement: booking.seats } },
+    });
+  }
+}
+
 /** Executes the cancellation outcome for a collected booking. */
 export async function executeCancellation(params: {
   bookingId: string;
@@ -212,6 +243,18 @@ export async function executeCancellation(params: {
       where: { id: booking.id },
       data: { status: "cancelled", cancelledAt: new Date(), cancelTier: "early" },
     });
+    await releaseBookingSeats(booking);
+    // Voiding an unpaid booking must NOT burn the credit the passenger applied
+    // — nothing was collected, so the credit value goes straight back.
+    if (booking.creditApplied > 0) {
+      await restoreCredit({
+        passengerId: booking.passengerId,
+        sourceBookingId: booking.id,
+        amount: booking.creditApplied,
+        validityDays: cfg.creditValidityDays,
+        note: `Credit restored — booking ${booking.code} cancelled before payment`,
+      });
+    }
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,
@@ -219,7 +262,7 @@ export async function executeCancellation(params: {
       action: "booking.void_unpaid",
       entity: "booking",
       entityId: booking.id,
-      metadata: { code: booking.code },
+      metadata: { code: booking.code, creditRestored: booking.creditApplied },
     });
     return { outcome: "voided_unpaid", tier: "early" };
   }
@@ -307,6 +350,7 @@ export async function executeCancellation(params: {
       where: { id: booking.id },
       data: { status: "cancelled", cancelledAt: now, cancelTier: tier },
     });
+    await releaseBookingSeats(booking);
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,
@@ -363,10 +407,24 @@ export async function executeCancellation(params: {
           statusChangedAt: new Date(),
         },
       });
+      // Full cash refund by admin decision? Then the credit portion must come
+      // back too — the platform never keeps value on a fully refunded fare.
+      let creditRestoredByAdmin = 0;
+      if (amount >= entry.cashAmount && entry.creditApplied > 0) {
+        creditRestoredByAdmin = entry.creditApplied;
+        await restoreCredit({
+          passengerId: booking.passengerId,
+          sourceBookingId: booking.id,
+          amount: entry.creditApplied,
+          validityDays: cfg.creditValidityDays,
+          note: `Credit restored — admin refund on ${booking.code}`,
+        });
+      }
       await db.booking.update({
         where: { id: booking.id },
         data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
       });
+      await releaseBookingSeats(booking);
       await audit({
         actorId: params.actor.id,
         actorName: params.actor.name,
@@ -374,7 +432,7 @@ export async function executeCancellation(params: {
         action: "money.admin_override_refund",
         entity: "booking",
         entityId: booking.id,
-        metadata: { code: booking.code, amount, commissionReversed, driverClawback },
+        metadata: { code: booking.code, amount, commissionReversed, driverClawback, creditRestored: creditRestoredByAdmin },
       });
       return { outcome: "admin_refund", tier: "late" };
     }
@@ -397,6 +455,7 @@ export async function executeCancellation(params: {
       where: { id: booking.id },
       data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
     });
+    await releaseBookingSeats(booking);
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,
