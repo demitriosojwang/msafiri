@@ -90,6 +90,15 @@ export { PASSENGER_COOKIE, ADMIN_COOKIE };
 
 // ─── Phone normalization (Kenyan numbers) ───────────────────────────────────
 
+/**
+ * Guests are auto-provisioned sessions (phone `guest-xxxx`, isGuest true).
+ * The phone-prefix check also covers guest rows created before the isGuest
+ * column existed. Only non-guests may book more than one seat.
+ */
+export function isGuestPassenger(p: { isGuest: boolean; phone: string }): boolean {
+  return p.isGuest || p.phone.startsWith("guest-");
+}
+
 export function normalizePhone(input: string): string | null {
   const digits = input.replace(/[^\d+]/g, "");
   let n = digits.startsWith("+") ? digits.slice(1) : digits;

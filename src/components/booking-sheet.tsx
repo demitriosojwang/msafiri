@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Sheet,
   SheetContent,
@@ -14,10 +15,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PaySheet } from "@/components/pay-sheet";
-import { api, useMe } from "@/lib/client";
+import { api, useMe, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
+import { BadgeCheck, Crown, Home, Loader2, Lock, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
 export interface Stage {
@@ -86,23 +94,39 @@ interface CreateResponse {
   };
 }
 
-/** Tahmeed-style guest checkout: the last details typed on this device prefill
- *  the next booking — convenience only, never an account. */
+/** Details typed on this device prefill the next booking AND the account
+ *  form — the exact same details create/sign into a Mireli account. */
 const GUEST_KEY = "mireli.guest";
 
-function loadGuest(): { name: string; phone: string } {
-  if (typeof window === "undefined") return { name: "", phone: "" };
+type StoredDetails = Partial<PassengerDetails> & { name?: string };
+
+function loadStoredDetails(): StoredDetails {
+  if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(GUEST_KEY);
     if (raw) return JSON.parse(raw);
   } catch {}
-  return { name: "", phone: "" };
+  return {};
 }
 
-/** Loose client-side check mirroring the server's toMpesaMsISDN. */
+/** Loose client-side checks mirroring the server's validators. */
 function isValidMpesaPhone(input: string): boolean {
   const d = input.replace(/\D/g, "");
   return /^(?:254|0)?(?:7|1)\d{8}$/.test(d);
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const GENDERS = ["Male", "Female", "Other"];
+
+function detailsComplete(d: PassengerDetails): boolean {
+  return (
+    d.fullName.trim().length >= 2 &&
+    d.idNumber.trim().length >= 4 &&
+    d.nationality.trim().length >= 3 &&
+    GENDERS.includes(d.gender) &&
+    EMAIL_RE.test(d.email.trim()) &&
+    isValidMpesaPhone(d.phone)
+  );
 }
 
 export function BookingSheet({
@@ -125,9 +149,23 @@ export function BookingSheet({
   const [payOpen, setPayOpen] = useState(false);
 
   const { me } = useMe();
+  const meRef = useRef(me);
+  meRef.current = me;
   const creditBalance = me?.creditBalance || 0;
-  const [guestName, setGuestName] = useState("");
-  const [guestPhone, setGuestPhone] = useState("");
+  const isGuest = me?.passenger?.isGuest ?? true;
+  const [details, setDetails] = useState<PassengerDetails>({
+    fullName: "",
+    idNumber: "",
+    nationality: "Kenyan",
+    gender: "",
+    email: "",
+    phone: "",
+  });
+
+  function setDetail<K extends keyof PassengerDetails>(key: K, value: string) {
+    setDetails((d) => ({ ...d, [key]: value }));
+    setError(null);
+  }
 
   useEffect(() => {
     if (open && draft) {
@@ -136,9 +174,23 @@ export function BookingSheet({
       setError(null);
       setCreated(null);
       setPayOpen(false);
-      const g = loadGuest();
-      setGuestName(g.name || "");
-      setGuestPhone(g.phone || "");
+      // Prefill from the signed-in profile (guests included — their guest
+      // record is stamped with the details they booked with), falling back
+      // to whatever was last typed on this device.
+      const p = meRef.current?.passenger;
+      const stored = loadStoredDetails();
+      const accountName =
+        p?.name?.trim() && p.name.trim().toLowerCase() !== "guest" ? p.name.trim() : "";
+      const accountPhone =
+        p?.phone && !p.phone.startsWith("guest-") ? p.phone.replace("+254", "0") : "";
+      setDetails({
+        fullName: accountName || stored.fullName || stored.name || "",
+        idNumber: p?.idNumber || stored.idNumber || "",
+        nationality: p?.nationality || stored.nationality || "Kenyan",
+        gender: p?.gender || stored.gender || "",
+        email: p?.email || stored.email || "",
+        phone: accountPhone || stored.phone || "",
+      });
     }
   }, [open, draft]);
 
@@ -150,10 +202,13 @@ export function BookingSheet({
   const total = fare + surcharge;
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
-  const guestDetailsOk = guestName.trim().length >= 2 && isValidMpesaPhone(guestPhone);
+  const detailsOk = detailsComplete(details);
+  // The guest rule, mirrored client-side: more than 1 seat (or a whole-cab
+  // charter) needs an account. The API enforces this as the source of truth.
+  const needsAccount = isGuest && (draft?.charter || (draft?.seats || 1) > 1);
 
   async function confirm() {
-    if (!trip || !draft || !guestDetailsOk) return;
+    if (!trip || !draft || !detailsOk || needsAccount) return;
     setBusy(true);
     setError(null);
     try {
@@ -168,12 +223,16 @@ export function BookingSheet({
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
           travelDate: trip.departureAt.slice(0, 10),
-          passengerName: guestName.trim(),
-          passengerPhone: guestPhone,
+          passengerName: details.fullName.trim(),
+          passengerPhone: details.phone,
+          passengerEmail: details.email.trim(),
+          idNumber: details.idNumber.trim(),
+          nationality: details.nationality.trim(),
+          gender: details.gender,
         },
       });
       try {
-        window.localStorage.setItem(GUEST_KEY, JSON.stringify({ name: guestName.trim(), phone: guestPhone }));
+        window.localStorage.setItem(GUEST_KEY, JSON.stringify(details));
       } catch {}
       setCreated(res.booking);
       await refresh();
@@ -334,33 +393,111 @@ export function BookingSheet({
                 </div>
               )}
 
-              {/* Guest checkout — who is travelling? No account needed. */}
-              <div className="space-y-2 rounded-lg border bg-card p-3">
-                <div className="flex items-center justify-between">
-                  <Label className="flex items-center gap-1 text-xs">
-                    <UserRound className="h-3 w-3" /> Your details
-                  </Label>
-                  <span className="text-[10px] text-muted-foreground">book as a guest — no account needed</span>
+              {/* Primary Passenger — Personal Details + Contact Info */}
+              {needsAccount ? (
+                <div className="space-y-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-amber-900">
+                    <Lock className="h-4 w-4" /> Login required
+                  </div>
+                  <p className="text-xs text-amber-900">
+                    You can only book up to 1 seat without logging in. Login to book more seats.
+                  </p>
+                  <Button asChild variant="outline" className="h-9 w-full border-amber-300 bg-white/60">
+                    <Link href="/login?next=/">Login to book more seats</Link>
+                  </Button>
                 </div>
-                <Input
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  placeholder="Full name (as the driver should know you)"
-                  className="h-9"
-                  autoComplete="name"
-                />
-                <Input
-                  value={guestPhone}
-                  onChange={(e) => setGuestPhone(e.target.value)}
-                  placeholder="M-Pesa number · 07XX XXX XXX"
-                  inputMode="tel"
-                  className="h-9"
-                  autoComplete="tel"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  We reach this number with the M-Pesa prompt and pickup updates. Your name goes on the seat list the driver sees.
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-3 rounded-lg border bg-card p-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-1 text-xs">
+                      <UserRound className="h-3 w-3" /> Primary Passenger
+                    </Label>
+                    {isGuest ? (
+                      <span className="text-[10px] text-muted-foreground">booking as a guest</span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[10px] text-emerald-700">
+                        <BadgeCheck className="h-3 w-3" /> from your account
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Personal Details
+                    </div>
+                    <Input
+                      value={details.fullName}
+                      onChange={(e) => setDetail("fullName", e.target.value)}
+                      placeholder="Full Name"
+                      className="h-9"
+                      autoComplete="name"
+                    />
+                    <Input
+                      value={details.idNumber}
+                      onChange={(e) => setDetail("idNumber", e.target.value)}
+                      placeholder="ID/Passport Number"
+                      className="h-9"
+                      autoComplete="off"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        value={details.nationality}
+                        onChange={(e) => setDetail("nationality", e.target.value)}
+                        placeholder="Nationality"
+                        className="h-9"
+                        autoComplete="country"
+                      />
+                      <Select value={details.gender} onValueChange={(v) => setDetail("gender", v)}>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Gender" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Male">Male</SelectItem>
+                          <SelectItem value="Female">Female</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Contact Info
+                    </div>
+                    <Input
+                      type="email"
+                      value={details.email}
+                      onChange={(e) => setDetail("email", e.target.value)}
+                      placeholder="Email"
+                      className="h-9"
+                      autoComplete="email"
+                      inputMode="email"
+                    />
+                    <Input
+                      value={details.phone}
+                      onChange={(e) => setDetail("phone", e.target.value)}
+                      placeholder="Phone Number · 07XX XXX XXX"
+                      inputMode="tel"
+                      className="h-9"
+                      autoComplete="tel"
+                    />
+                  </div>
+
+                  <p className="text-[10px] text-muted-foreground">
+                    We reach this number with the M-Pesa prompt and pickup updates; the name and ID
+                    go on the seat list the driver sees.
+                    {isGuest && (
+                      <>
+                        {" "}You can book <b>1 seat</b> as a guest —{" "}
+                        <Link href="/login?next=/" className="underline">
+                          login with the same details
+                        </Link>{" "}
+                        to book more.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
 
               {/* Fare breakdown */}
               <div className="space-y-1.5 rounded-lg border bg-card p-3 text-xs">
@@ -406,7 +543,11 @@ export function BookingSheet({
 
           {!created && (
             <SheetFooter className="px-4 pb-4">
-              <Button className="h-11 w-full" disabled={busy || !draft.stageId || !guestDetailsOk} onClick={confirm}>
+              <Button
+                className="h-11 w-full"
+                disabled={busy || !draft.stageId || !detailsOk || needsAccount}
+                onClick={confirm}
+              >
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : isCharter ? (

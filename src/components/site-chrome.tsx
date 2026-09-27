@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { AlarmClock, Anchor, Info, MapPin, Train as TrainIcon, User, Wallet, X } from "lucide-react";
-import { useMe } from "@/lib/client";
+import { AlarmClock, Anchor, BadgeCheck, IdCard, Info, LogOut, Mail, MapPin, Phone, Train as TrainIcon, User, UserRound, Wallet, X } from "lucide-react";
+import { api, notifyAuthChange, useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 /** Rounded brand tile — the logo image itself, like the app icon. */
@@ -21,11 +21,14 @@ export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
 
 /**
  * App header — sticky, blurred, phone-width. Logo tile + wordmark + subtitle
- * + Info button. Matches the original app chrome. No auth in the flow —
- * the platform starts a guest session silently on first visit.
+ * + account chip + Info button. Guests get a silent session on first visit;
+ * the chip is where they sign in (same-details form) and accounts sign out.
  */
 export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: string }) {
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const { me, refresh } = useMe();
+  const isGuest = me?.passenger?.isGuest ?? true;
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
@@ -40,6 +43,23 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Account chip — guests sign in; accounts open their profile */}
+          {me &&
+            (isGuest ? (
+              <Button asChild size="sm" variant="outline" className="h-8 gap-1 rounded-full px-3 text-[11px]">
+                <Link href="/login?next=/">
+                  <UserRound className="h-3.5 w-3.5" /> Sign in
+                </Link>
+              </Button>
+            ) : (
+              <button
+                onClick={() => setAccountOpen(true)}
+                aria-label="Your account"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shadow-sm transition-transform hover:scale-105"
+              >
+                {(me.session?.name || "P").trim().charAt(0).toUpperCase()}
+              </button>
+            ))}
           <button
             onClick={() => setAboutOpen(true)}
             className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -50,7 +70,90 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
         </div>
       </div>
       <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} />
+      <AccountSheet
+        open={accountOpen}
+        onOpenChange={setAccountOpen}
+        name={me?.session?.name || null}
+        identifier={me?.session?.identifier || null}
+        email={me?.passenger?.email || null}
+        idNumber={me?.passenger?.idNumber || null}
+        onSignedOut={() => {
+          setAccountOpen(false);
+          refresh();
+        }}
+      />
     </header>
+  );
+}
+
+function AccountSheet({
+  open,
+  onOpenChange,
+  name,
+  identifier,
+  email,
+  idNumber,
+  onSignedOut,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  name: string | null;
+  identifier: string | null;
+  email: string | null;
+  idNumber: string | null;
+  onSignedOut: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function signOut() {
+    setBusy(true);
+    try {
+      await api("/api/auth", { body: { step: "logout" } });
+      notifyAuthChange();
+    } finally {
+      setBusy(false);
+      onSignedOut();
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2 text-xl">
+            <UserRound className="h-5 w-5 text-primary" /> Your account
+          </SheetTitle>
+          <SheetDescription>Book with these details on any device — they identify your account.</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-3 px-4 pb-6">
+          <div className="space-y-1.5 rounded-lg border bg-card p-3 text-sm">
+            <div className="flex items-center gap-2">
+              <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="font-medium">{name || "Passenger"}</span>
+              <BadgeCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+            </div>
+            {identifier && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Phone className="h-3.5 w-3.5 shrink-0" /> {identifier.replace("+254", "0")}
+              </div>
+            )}
+            {email && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Mail className="h-3.5 w-3.5 shrink-0" /> {email}
+              </div>
+            )}
+            {idNumber && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <IdCard className="h-3.5 w-3.5 shrink-0" /> ID/Passport · {idNumber}
+              </div>
+            )}
+          </div>
+          <Button variant="outline" className="w-full" onClick={signOut} disabled={busy}>
+            <LogOut className="mr-1 h-4 w-4" /> {busy ? "Signing out…" : "Sign out"}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

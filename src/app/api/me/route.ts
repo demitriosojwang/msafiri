@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import {
   getPassengerSession,
   encodeSession,
+  isGuestPassenger,
   passengerCookieOptions,
   type Session,
 } from "@/lib/session";
@@ -62,7 +63,7 @@ async function createGuestPassenger() {
   for (let i = 0; i < 3; i++) {
     const phone = `guest-${crypto.randomBytes(4).toString("hex")}`;
     try {
-      return await db.passenger.create({ data: { phone, name: "Guest" } });
+      return await db.passenger.create({ data: { phone, name: "Guest", isGuest: true } });
     } catch {
       // collision — try a new suffix
     }
@@ -71,7 +72,16 @@ async function createGuestPassenger() {
 }
 
 async function respondFor(
-  passenger: { id: string; name: string | null; phone: string },
+  passenger: {
+    id: string;
+    name: string | null;
+    phone: string;
+    email: string | null;
+    idNumber: string | null;
+    nationality: string | null;
+    gender: string | null;
+    isGuest: boolean;
+  },
   session: Session,
   setCookie = false
 ) {
@@ -81,7 +91,16 @@ async function respondFor(
   const creditBalance = credits.reduce((s, c) => s + c.amount, 0);
   const res = NextResponse.json({
     session,
-    passenger: { id: passenger.id, name: passenger.name, phone: passenger.phone },
+    passenger: {
+      id: passenger.id,
+      name: passenger.name,
+      phone: passenger.phone,
+      email: passenger.email,
+      idNumber: passenger.idNumber,
+      nationality: passenger.nationality,
+      gender: passenger.gender,
+      isGuest: isGuestPassenger(passenger),
+    },
     creditBalance,
     activeCredits: credits.length,
   });

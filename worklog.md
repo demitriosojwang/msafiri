@@ -207,3 +207,26 @@ Work Log:
 
 Stage Summary:
 - 5 real defects fixed (1 crash, 2 money/capacity leaks, 1 race condition, 1 display bug) + 2 audit/repair scripts added; all flows re-verified green and DB integrity clean. Codebase is crash-safe on malformed input, race-safe on allocation, and no longer leaks seats or passenger credit on cancellation.
+
+---
+Task ID: 12
+Agent: Super Z (main agent)
+Task: Passenger booking rule — guests limited to 1 seat; full Primary Passenger details (Personal Details + Contact Info) required for every booking; multi-seat requires an account created by filling the exact same details.
+
+Work Log:
+- Schema: Passenger += idNumber/nationality/gender/isGuest; Booking += passengerEmail/passengerIdNumber/passengerNationality/passengerGender snapshots; db:push clean.
+- session.ts: isGuestPassenger() (isGuest flag OR legacy guest- phone prefix).
+- /api/me: guests created with isGuest:true; response now carries full profile + isGuest.
+- /api/auth: replaced OTP flow with identity step — one details form signs in AND signs up; unknown phone + guest session → promote record in place (bookings/credits carry over); known phone → sign in + fill profile blanks; brand-new row → welcome credit.
+- /api/bookings POST: validates all 6 detail fields (clean 400s); guest rule enforced server-side — seats>1 or charter → 403 {requiresAccount}; guest bookings stamp the guest record with details (or link to existing account when the phone already exists); signed-in users get profile blanks filled, never overwritten.
+- client.ts: Me extended; PassengerDetails type; notifyAuthChange() event so all useMe() instances refresh after login/logout (fixed stale guest cap after sign-out).
+- login-screen.tsx: rewritten as the details form (sign in/sign up, prefilled from device storage).
+- booking-sheet.tsx: Primary Passenger form (Personal Details + Contact Info); account-required gate panel with the exact rule text; "Guest" no longer prefills as a name.
+- page.tsx: seat stepper capped at 1 for guests + amber rule notice; charter note for guests; seat value clamp on auth change.
+- site-chrome.tsx: header account chip (Sign in / avatar) + profile sheet with sign out.
+- E2E verified: guest 2 seats → 403; guest 1 seat + full details → success + STK payment; signup promotes guest (credit + booking carried); account books 3 seats; guest charter → 403; missing details → clean 400; live sign-in/sign-out toggles the cap without reload; seats released on cancelled test bookings.
+- Restarted dev server post-db:push (stale Prisma client caused a transient "Could not start a guest session").
+
+Stage Summary:
+- Rule live end-to-end: 1 seat without login, full details required, same-details form = account creation for multi-seat.
+- Test bookings cancelled; trip seat counts restored (13/13).

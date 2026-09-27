@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
@@ -104,6 +105,8 @@ export default function Home() {
   const [payFor, setPayFor] = useState<BookingRow | null>(null);
 
   const isAuthed = !!me?.session;
+  // Guest rule: without an account you can book up to 1 seat — login unlocks more.
+  const isGuest = me?.passenger?.isGuest ?? true;
 
   const loadTrips = useCallback(async (dir: string, d: string) => {
     setLoading(true);
@@ -223,8 +226,11 @@ export default function Home() {
   }, [loading, visibleTrips]);
 
   useEffect(() => {
-    if (!loading && seats > seatCap) setSeats(seatCap);
-  }, [loading, seatCap, seats]);
+    if (loading) return;
+    // Clamp to what the current session may book (guests: 1 seat).
+    const cap = isGuest ? Math.min(1, seatCap) : seatCap;
+    if (seats > cap) setSeats(cap);
+  }, [loading, seatCap, seats, isGuest]);
 
   // Live fare preview
   const previewStage = selectedPoint?.point;
@@ -401,7 +407,9 @@ export default function Home() {
                       <Crown className="h-4 w-4 text-violet-600" /> Book the whole vehicle (private)
                     </Label>
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Reserve the entire cab for your family or group — no other passengers join.
+                      {isGuest
+                        ? "Charters need an account — login to book the whole cab."
+                        : "Reserve the entire cab for your family or group — no other passengers join."}
                     </p>
                   </div>
                   <Switch
@@ -445,11 +453,23 @@ export default function Home() {
                 <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> How many seats?
                 </div>
-                <SeatStepper value={seats} onChange={setSeats} min={1} max={seatCap} />
-                {!loading && visibleTrips.length > 0 && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Up to {seatCap} {seatCap === 1 ? "seat" : "seats"} can be booked on the cabs listed below.
-                  </p>
+                <SeatStepper value={seats} onChange={setSeats} min={1} max={isGuest ? Math.min(1, seatCap) : seatCap} />
+                {isGuest ? (
+                  <div className="mt-1.5 flex items-start justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+                    <span>
+                      You can only book up to <b>1 seat</b> without logging in. Login to book more seats.
+                    </span>
+                    <Button asChild size="sm" variant="outline" className="h-7 shrink-0 border-amber-300 bg-white/60 text-[11px]">
+                      <Link href="/login?next=/">Login</Link>
+                    </Button>
+                  </div>
+                ) : (
+                  !loading &&
+                  visibleTrips.length > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Up to {seatCap} {seatCap === 1 ? "seat" : "seats"} can be booked on the cabs listed below.
+                    </p>
+                  )
                 )}
               </div>
             )}

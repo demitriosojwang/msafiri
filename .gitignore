@@ -58,3 +58,8 @@ server.log
 # workspace dumps
 *.tar
 !.env.example
+
+# runtime artifacts
+tool-results/
+download/
+.zscripts/

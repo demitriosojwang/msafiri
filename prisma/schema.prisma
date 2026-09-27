@@ -10,13 +10,20 @@ datasource db {
 // ─── People ──────────────────────────────────────────────────────────────────
 
 model Passenger {
-  id        String   @id @default(cuid())
-  phone     String   @unique
-  name      String?
-  email     String?
-  createdAt DateTime @default(now())
-  bookings  Booking[]
-  credits   Credit[]
+  id          String   @id @default(cuid())
+  phone       String   @unique
+  name        String?
+  email       String?
+  idNumber    String? // National ID or passport number
+  nationality String?
+  gender      String? // Male | Female | Other
+  // Auto-provisioned browsing sessions are guests (1-seat checkout only).
+  // Filling the account details form promotes the same record to a full
+  // account — bookings and credits carry over untouched.
+  isGuest     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  bookings    Booking[]
+  credits     Credit[]
 }
 
 // Drivers exist here as data the ADMIN manages (CRUD, M-Pesa number, allocation).
@@ -131,8 +138,12 @@ model Booking {
   allocationNote String?
   // Guest checkout (Tahmeed-style): who is travelling, captured at booking
   // time with no account needed. Phone doubles as the default M-Pesa number.
-  passengerName  String?
-  passengerPhone String? // normalized 2547XXXXXXXX
+  passengerName       String?
+  passengerPhone      String? // normalized 2547XXXXXXXX
+  passengerEmail      String?
+  passengerIdNumber   String? // National ID or passport (boarding identification)
+  passengerNationality String?
+  passengerGender     String?
   ledgerEntry   LedgerEntry?
   refunds       RefundRecord[]
   mpesaTransactions MpesaTransaction[]

@@ -1,40 +1,101 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/client";
-import { Mail, Phone, ArrowRight, ShieldCheck } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { api, notifyAuthChange, useMe, type PassengerDetails } from "@/lib/client";
+import { ArrowRight, BadgeCheck, IdCard, Mail, Phone, ShieldCheck, UserRound } from "lucide-react";
 import { LogoTile } from "@/components/site-chrome";
-import { cn } from "@/lib/utils";
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Loose client-side check mirroring the server's normalizePhone. */
+function isValidPhone(input: string): boolean {
+  const d = input.replace(/\D/g, "");
+  return /^(?:254|0)?(?:7|1)\d{8}$/.test(d);
+}
+
+/** Details stored on this device prefill the form — the exact same details
+ *  used at guest checkout are all it takes to create/sign into an account. */
+const DETAILS_KEY = "mireli.guest";
+
+function loadDetails(): Partial<PassengerDetails> & { name?: string } {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(DETAILS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
 
 /**
- * Original-style login: centered logo + wordmark + tagline, identifier → OTP,
- * first-time name capture, trust indicators. Wired to the real /api/auth.
+ * One details form — sign in AND sign up:
+ *  - new phone → creates the Mi-Reli account (promoting this device's guest
+ *    session in place, so prior bookings and credits carry over);
+ *  - known phone → signs straight back in.
+ * Filling the exact same details asked at checkout is all the identity the
+ * prototype needs. Wired to POST /api/auth { step: "identity" }.
  */
 export function LoginScreen({ onDone }: { onDone: () => void }) {
-  const [identifier, setIdentifier] = useState("");
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [needsName, setNeedsName] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
+  const { me } = useMe();
+  const [details, setDetails] = useState<PassengerDetails>({
+    fullName: "",
+    idNumber: "",
+    nationality: "Kenyan",
+    gender: "",
+    email: "",
+    phone: "",
+  });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const isEmail = identifier.includes("@");
+  useEffect(() => {
+    const stored = loadDetails();
+    setDetails((d) => ({
+      fullName: d.fullName || stored.fullName || stored.name || "",
+      idNumber: d.idNumber || stored.idNumber || "",
+      nationality: d.nationality || stored.nationality || "Kenyan",
+      gender: d.gender || stored.gender || "",
+      email: d.email || stored.email || "",
+      phone: d.phone || stored.phone || "",
+    }));
+  }, []);
 
-  async function handleSendOtp() {
-    if (identifier.trim().length < 5) {
-      setError("Enter a valid email or phone number");
-      return;
-    }
+  function set<K extends keyof PassengerDetails>(key: K, value: string) {
+    setDetails((d) => ({ ...d, [key]: value }));
+    setError(null);
+  }
+
+  const valid =
+    details.fullName.trim().length >= 2 &&
+    details.idNumber.trim().length >= 4 &&
+    details.nationality.trim().length >= 3 &&
+    ["Male", "Female", "Other"].includes(details.gender) &&
+    EMAIL_RE.test(details.email.trim()) &&
+    isValidPhone(details.phone);
+
+  async function submit() {
+    if (!valid || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await api("/api/auth", { body: { step: "request", identifier } });
-      setOtpSent(true);
+      await api("/api/auth", {
+        body: { step: "identity", ...details, fullName: details.fullName.trim() },
+      });
+      try {
+        window.localStorage.setItem(DETAILS_KEY, JSON.stringify(details));
+      } catch {}
+      notifyAuthChange();
+      onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -42,38 +103,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     }
   }
 
-  async function handleVerifyOtp() {
-    if (code.length !== 4) {
-      setError("Enter the 4-digit code");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api<{ ok?: boolean; needsName?: boolean }>("/api/auth", {
-        body: { step: "verify", identifier, code, name },
-      });
-      if (res.needsName) {
-        setNeedsName(true);
-        setError(null);
-        return;
-      }
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Verification failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function reset() {
-    setIdentifier("");
-    setCode("");
-    setName("");
-    setNeedsName(false);
-    setOtpSent(false);
-    setError(null);
-  }
+  const signedIn = !!me?.session && me.passenger?.isGuest === false;
 
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-background">
@@ -87,106 +117,119 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           <LogoTile size="lg" />
         </motion.div>
         <h1 className="mb-1 mt-4 text-2xl font-bold tracking-tight">Mi-Reli</h1>
-        <p className="mb-8 text-sm text-muted-foreground">Ride · Connect · Journey</p>
+        <p className="mb-6 text-sm text-muted-foreground">Ride · Connect · Journey</p>
+
+        {signedIn && (
+          <div className="mb-4 flex w-full max-w-sm items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+            <BadgeCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span>
+              You&apos;re signed in as <b>{me?.session?.name}</b>. Filling this form with the same
+              details keeps you on the same account.
+            </span>
+          </div>
+        )}
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-4">
-          {!otpSent ? (
-            <>
-              <div className="mb-2 text-center">
-                <h2 className="text-lg font-semibold">Welcome</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Log in with your email or phone number</p>
-              </div>
+          <div className="mb-2 text-center">
+            <h2 className="text-lg font-semibold">Sign in or create your account</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              One form for both — use the exact same details you book with.
+            </p>
+          </div>
 
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1 text-xs">
-                  {isEmail ? <Mail className="h-3 w-3" /> : <Phone className="h-3 w-3" />}
-                  Email or phone
-                </Label>
+          {/* Personal Details */}
+          <div className="space-y-2 rounded-xl border bg-card p-3">
+            <Label className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <UserRound className="h-3 w-3" /> Personal Details
+            </Label>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Input
+                value={details.fullName}
+                onChange={(e) => set("fullName", e.target.value)}
+                placeholder="Full Name"
+                className="h-10"
+                autoComplete="name"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <IdCard className="h-3 w-3" /> ID/Passport Number
+              </Label>
+              <Input
+                value={details.idNumber}
+                onChange={(e) => set("idNumber", e.target.value)}
+                placeholder="e.g. 12345678 or A1234567"
+                className="h-10"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Nationality</Label>
                 <Input
-                  type="text"
-                  value={identifier}
-                  onChange={(e) => {
-                    setIdentifier(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder="you@example.com or +254 7XX XXX XXX"
-                  className="h-11"
-                  autoFocus
-                  onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
-                  disabled={busy}
+                  value={details.nationality}
+                  onChange={(e) => set("nationality", e.target.value)}
+                  placeholder="Kenyan"
+                  className="h-10"
                 />
               </div>
-              {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={handleSendOtp} disabled={busy}>
-                Continue <ArrowRight className="ml-1 h-4 w-4" />
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="mb-2 text-center">
-                <h2 className="text-lg font-semibold">Verify</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Enter the code sent to {identifier}</p>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Gender</Label>
+                <Select value={details.gender} onValueChange={(v) => set("gender", v)}>
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
+          </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs">Verification code</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={code}
-                  onChange={(e) => {
-                    setCode(e.target.value.replace(/\D/g, ""));
-                    setError(null);
-                  }}
-                  placeholder="••••"
-                  className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
-                  autoFocus
-                  onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
-                  disabled={busy}
-                />
-              </div>
+          {/* Contact Info */}
+          <div className="space-y-2 rounded-xl border bg-card p-3">
+            <Label className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Mail className="h-3 w-3" /> Contact Info
+            </Label>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Email</Label>
+              <Input
+                type="email"
+                value={details.email}
+                onChange={(e) => set("email", e.target.value)}
+                placeholder="you@example.com"
+                className="h-10"
+                autoComplete="email"
+                inputMode="email"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Phone className="h-3 w-3" /> Phone Number
+              </Label>
+              <Input
+                type="tel"
+                value={details.phone}
+                onChange={(e) => set("phone", e.target.value)}
+                placeholder="07XX XXX XXX"
+                className="h-10"
+                autoComplete="tel"
+                inputMode="tel"
+              />
+            </div>
+          </div>
 
-              {needsName && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3"
-                >
-                  <Label className="flex items-center gap-1 text-xs text-primary">
-                    <ShieldCheck className="h-3 w-3" /> Your name (first time here)
-                  </Label>
-                  <Input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Amina Wanjiru"
-                    className="h-11"
-                    autoFocus
-                    onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
-                  />
-                </motion.div>
-              )}
-
-              {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button
-                className="h-11 w-full"
-                onClick={handleVerifyOtp}
-                disabled={busy || code.length !== 4 || (needsName && name.length < 2)}
-              >
-                Verify &amp; log in <ArrowRight className="ml-1 h-4 w-4" />
-              </Button>
-              <p className="text-center text-[10px] text-muted-foreground">
-                Demo: any 4-digit code works. In production, this is sent via SMS or email.
-              </p>
-            </>
-          )}
-
-          {otpSent && (
-            <button onClick={reset} className="w-full text-center text-xs text-muted-foreground hover:text-foreground">
-              ← Use a different email or phone
-            </button>
-          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <Button className="h-11 w-full" onClick={submit} disabled={busy || !valid}>
+            {busy ? "Please wait…" : "Continue"} <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+          <p className="text-center text-[10px] text-muted-foreground">
+            Your phone number identifies your account — bookings made with it show up here.
+          </p>
         </motion.div>
 
         {/* Trust indicators */}

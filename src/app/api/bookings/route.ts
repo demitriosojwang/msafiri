@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getPassengerSession } from "@/lib/session";
+import { getPassengerSession, isGuestPassenger, normalizePhone } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
 import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const GENDERS = ["Male", "Female", "Other"];
 
 /** My bookings */
 export async function GET() {
@@ -75,6 +78,9 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await getPassengerSession();
   if (!session) return NextResponse.json({ error: "Sign in to book" }, { status: 401 });
+  const me = await db.passenger.findUnique({ where: { id: session.id } });
+  if (!me) return NextResponse.json({ error: "Sign in to book" }, { status: 401 });
+  const hasAccount = !isGuestPassenger(me);
 
   const body = await req.json().catch(() => ({}));
   const {
@@ -87,18 +93,40 @@ export async function POST(req: NextRequest) {
     isCharter = false,
     applyCredit = false,
     travelDate, // YYYY-MM-DD (the day the passenger wants to travel)
-    passengerName, // guest checkout — no account needed
+    passengerName, // primary passenger — full details required for every booking
     passengerPhone, // doubles as the default M-Pesa number
+    passengerEmail,
+    idNumber,
+    nationality,
+    gender,
   } = body;
 
-  // Guest checkout details (Tahmeed-style): anyone can book and pay without
-  // signing in — we just need to know who is travelling and how to reach them.
-  const guestName = String(passengerName || "").trim();
-  if (guestName.length < 2) {
+  // Primary passenger details (Personal Details + Contact Info). Everyone
+  // fills these — guest or signed-in — so the driver's seat list identifies
+  // who is actually travelling.
+  const fullName = String(passengerName || "").trim();
+  if (fullName.length < 2) {
     return NextResponse.json({ error: "Enter the passenger's full name" }, { status: 400 });
   }
-  const guestPhone = toMpesaMsISDN(String(passengerPhone || ""));
-  if (!guestPhone) {
+  const idNum = String(idNumber || "").trim();
+  if (idNum.length < 4) {
+    return NextResponse.json({ error: "Enter the passenger's ID/Passport number" }, { status: 400 });
+  }
+  const nat = String(nationality || "").trim();
+  if (nat.length < 3) {
+    return NextResponse.json({ error: "Enter the passenger's nationality" }, { status: 400 });
+  }
+  const gen = String(gender || "").trim();
+  if (!GENDERS.includes(gen)) {
+    return NextResponse.json({ error: "Select the passenger's gender" }, { status: 400 });
+  }
+  const email = String(passengerEmail || "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
+  const phone254 = toMpesaMsISDN(String(passengerPhone || ""));
+  const phoneNorm = normalizePhone(String(passengerPhone || ""));
+  if (!phone254 || !phoneNorm) {
     return NextResponse.json(
       { error: "Enter a valid M-Pesa number (07XX XXX XXX or 2547XX XXX XXX)" },
       { status: 400 },
@@ -129,6 +157,59 @@ export async function POST(req: NextRequest) {
   }
 
   const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
+
+  // THE GUEST RULE: up to 1 seat without an account. Charters (the whole cab)
+  // count as more than one seat, so they need an account too.
+  if (!hasAccount && (isCharter || tripSeats > 1)) {
+    return NextResponse.json(
+      {
+        error: "You can only book up to 1 seat without logging in. Log in to book more seats.",
+        requiresAccount: true,
+      },
+      { status: 403 },
+    );
+  }
+
+  // Resolve the booking owner. A guest session books under its own record
+  // (stamped with the provided details, so My rides shows the trip on this
+  // device); if the phone already belongs to a real account the booking lands
+  // in that account instead.
+  let owner = me;
+  if (!hasAccount) {
+    const existing = await db.passenger.findUnique({ where: { phone: phoneNorm } });
+    if (existing && existing.id !== me.id) {
+      owner = existing;
+    } else if (isGuestPassenger(me) && me.phone !== phoneNorm) {
+      // Stamp the guest record with real contact details (first booking on
+      // this device, or a follow-up booking with an updated number).
+      owner = await db.passenger
+        .update({
+          where: { id: me.id },
+          data: {
+            phone: phoneNorm,
+            name: fullName.slice(0, 80),
+            email,
+            idNumber: idNum,
+            nationality: nat,
+            gender: gen,
+          },
+        })
+        .catch(() => me); // ultra-rare phone race — keep the guest record
+    }
+  } else {
+    // Signed-in: never overwrite profile answers, just fill blanks.
+    owner = await db.passenger.update({
+      where: { id: me.id },
+      data: {
+        name: me.name || fullName.slice(0, 80),
+        email: me.email || email,
+        idNumber: me.idNumber || idNum,
+        nationality: me.nationality || nat,
+        gender: me.gender || gen,
+      },
+    });
+  }
+
   const fare = isCharter ? route.charterPrice : stage.fare * tripSeats;
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
   const total = fare + homeSurcharge;
@@ -136,7 +217,7 @@ export async function POST(req: NextRequest) {
   const booking = await db.booking.create({
     data: {
       code: generateBookingCode(),
-      passengerId: session.id,
+      passengerId: owner.id,
       routeId: route.id,
       direction,
       stageId: stage.id,
@@ -150,8 +231,12 @@ export async function POST(req: NextRequest) {
       creditApplied: 0,
       cashDue: total,
       status: "awaiting_payment",
-      passengerName: guestName.slice(0, 80),
-      passengerPhone: guestPhone,
+      passengerName: fullName.slice(0, 80),
+      passengerPhone: phone254,
+      passengerEmail: email.slice(0, 120),
+      passengerIdNumber: idNum.slice(0, 40),
+      passengerNationality: nat.slice(0, 60),
+      passengerGender: gen,
     },
   });
 
@@ -179,13 +264,13 @@ export async function POST(req: NextRequest) {
   });
 
   await audit({
-    actorId: session.id,
-    actorName: session.name,
+    actorId: owner.id,
+    actorName: owner.name || session.name,
     actorRole: "passenger",
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: guestName, passengerPhone: guestPhone },
+    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone254, bookedAsGuest: !hasAccount },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
@@ -201,8 +286,8 @@ export async function POST(req: NextRequest) {
       mpesaReceipt: null,
     });
     await audit({
-      actorId: session.id,
-      actorName: session.name,
+      actorId: owner.id,
+      actorName: owner.name || session.name,
       actorRole: "passenger",
       action: "payment.credit_full",
       entity: "booking",
