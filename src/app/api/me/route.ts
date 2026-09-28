@@ -71,7 +71,16 @@ async function createGuestPassenger() {
 }
 
 async function respondFor(
-  passenger: { id: string; name: string | null; phone: string },
+  passenger: {
+    id: string;
+    name: string | null;
+    phone: string;
+    email: string | null;
+    idType: string | null;
+    idNumber: string | null;
+    nationality: string | null;
+    gender: string | null;
+  },
   session: Session,
   setCookie = false
 ) {
@@ -79,9 +88,26 @@ async function respondFor(
     where: { passengerId: passenger.id, status: "active", expiresAt: { gt: new Date() } },
   });
   const creditBalance = credits.reduce((s, c) => s + c.amount, 0);
+  // Guest rule state: a guest who has already placed (and not cancelled) their
+  // single no-login booking must create an account to book again.
+  const guestUsed =
+    (await db.booking.count({
+      where: { passengerId: passenger.id, status: { notIn: ["cancelled"] } },
+    })) > 0;
   const res = NextResponse.json({
     session,
-    passenger: { id: passenger.id, name: passenger.name, phone: passenger.phone },
+    passenger: {
+      id: passenger.id,
+      name: passenger.name,
+      phone: passenger.phone,
+      email: passenger.email,
+      idType: passenger.idType,
+      idNumber: passenger.idNumber,
+      nationality: passenger.nationality,
+      gender: passenger.gender,
+      isGuest: passenger.phone.startsWith("guest-"),
+      guestUsed,
+    },
     creditBalance,
     activeCredits: credits.length,
   });

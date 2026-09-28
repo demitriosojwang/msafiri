@@ -1,0 +1,697 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import { useRouter } from "next/navigation";
+     5→import { motion, AnimatePresence } from "framer-motion";
+     6→import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+     7→import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
+     8→import { PaySheet } from "@/components/pay-sheet";
+     9→import { Button } from "@/components/ui/button";
+    10→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    11→import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    12→import { Label } from "@/components/ui/label";
+    13→import { Switch } from "@/components/ui/switch";
+    14→import { Skeleton } from "@/components/ui/skeleton";
+    15→import { api, useMe } from "@/lib/client";
+    16→import { fmtTime, ksh } from "@/lib/format";
+    17→import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
+    18→import {
+    19→  DatePicker,
+    20→  DotBadge,
+    21→  SeatMeter,
+    22→  SeatStepper,
+    23→  Stars,
+    24→  TrainPill,
+    25→  CharterBadge,
+    26→  fmtDateShort,
+    27→} from "@/components/app/shared";
+    28→import {
+    29→  Anchor,
+    30→  CalendarDays,
+    31→  Car,
+    32→  Clock,
+    33→  Crown,
+    34→  Home as HomeIcon,
+    35→  Info,
+    36→  MapPin,
+    37→  Navigation,
+    38→  Sparkles,
+    39→  Ticket as TicketIcon,
+    40→  Train as TrainIcon,
+    41→  Users,
+    42→} from "lucide-react";
+    43→import { cn } from "@/lib/utils";
+    44→
+    45→interface RouteInfo {
+    46→  id: string;
+    47→  name: string;
+    48→  durationMinutes: number;
+    49→  charterPrice: number;
+    50→  stages: { id: string; name: string; order: number; fare: number; homeSurcharge: number }[];
+    51→}
+    52→
+    53→interface BookingRow {
+    54→  id: string;
+    55→  code: string;
+    56→  stageName: string | null;
+    57→  status: string;
+    58→  cashDue: number;
+    59→  isCharter: boolean;
+    60→  departureAt: string | null;
+    61→  driver: { name: string; plate: string; phone?: string | null } | null;
+    62→}
+    63→
+    64→interface TrainRow {
+    65→  id: string;
+    66→  name: string;
+    67→  direction: "MBA_TO_NBO" | "NBO_TO_MBA";
+    68→  originTime: string;
+    69→  destTime: string;
+    70→}
+    71→
+    72→function coastOf(routeName: string): "north" | "south" {
+    73→  return routeName.toLowerCase().includes("south") ? "south" : "north";
+    74→}
+    75→
+    76→export default function Home() {
+    77→  const { me } = useMe();
+    78→  const router = useRouter();
+    79→  const splashSeen = useSplashOnce();
+    80→  const [splashDone, setSplashDone] = useState(false);
+    81→
+    82→  const showSplash = splashSeen && !splashDone;
+    83→
+    84→  const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
+    85→  const [date, setDate] = useState(() => {
+    86→    const d = new Date();
+    87→    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    88→  });
+    89→  const [routes, setRoutes] = useState<RouteInfo[]>([]);
+    90→  const [trips, setTrips] = useState<BookableTrip[] | null>(null);
+    91→  const [timetable, setTimetable] = useState<TrainRow[]>([]);
+    92→  const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
+    93→  const [loading, setLoading] = useState(false);
+    94→
+    95→  // selection state (original store equivalents)
+    96→  const [trainKey, setTrainKey] = useState<string | null>(null);
+    97→  const [pointId, setPointId] = useState<string | null>(null);
+    98→  const [homePickup, setHomePickup] = useState(false);
+    99→  const [charter, setCharter] = useState(false);
+   100→  const [seats, setSeats] = useState(1);
+   101→
+   102→  const [draft, setDraft] = useState<BookingDraft | null>(null);
+   103→  const [sheetOpen, setSheetOpen] = useState(false);
+   104→  const [payFor, setPayFor] = useState<BookingRow | null>(null);
+   105→
+   106→  const isAuthed = !!me?.session;
+   107→
+   108→  const loadTrips = useCallback(async (dir: string, d: string) => {
+   109→    setLoading(true);
+   110→    try {
+   111→      const res = await api<{ trips: BookableTrip[] }>(`/api/trips?date=${d}&direction=${dir}`);
+   112→      setTrips(res.trips);
+   113→    } catch {
+   114→      setTrips([]);
+   115→    } finally {
+   116→      setLoading(false);
+   117→    }
+   118→  }, []);
+   119→
+   120→  const loadMyBookings = useCallback(async () => {
+   121→    try {
+   122→      const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
+   123→      setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+   124→    } catch {
+   125→      setMyBookings([]);
+   126→    }
+   127→  }, []);
+   128→
+   129→  useEffect(() => {
+   130→    api<{ routes: RouteInfo[] }>("/api/routes")
+   131→      .then((r) => setRoutes(r.routes))
+   132→      .catch(() => {});
+   133→    api<{ trains: TrainRow[] }>("/api/trains")
+   134→      .then((r) => setTimetable(r.trains))
+   135→      .catch(() => {});
+   136→  }, []);
+   137→
+   138→  useEffect(() => {
+   139→    if (isAuthed) loadMyBookings();
+   140→  }, [isAuthed, loadMyBookings]);
+   141→
+   142→  useEffect(() => {
+   143→    if (showSplash || !isAuthed) return;
+   144→    loadTrips(direction, date);
+   145→  }, [showSplash, isAuthed, direction, date, loadTrips]);
+   146→
+   147→  function openBooking(trip: BookableTrip) {
+   148→    const fallbackStage =
+   149→      direction === "FROM_TERMINUS"
+   150→        ? trip.stages.filter((s) => s.order > 0).slice(-1)[0]
+   151→        : trip.stages.filter((s) => s.order > 0)[0];
+   152→    setDraft({
+   153→      trip,
+   154→      stageId: pointId && trip.stages.some((s) => s.id === pointId) ? pointId : fallbackStage?.id || "",
+   155→      seats,
+   156→      charter,
+   157→      homePickup,
+   158→      homeAddress: "",
+   159→      useCredit: false,
+   160→    });
+   161→    setSheetOpen(true);
+   162→  }
+   163→
+   164→  /* ─── Derived data (all hooks run before any early return) ──────────────── */
+   165→
+   166→  // Train pills — always the full Madaraka timetable for this direction
+   167→  // (08:00 Inter-County · 15:00 Express · 22:00 Night Train), each marked
+   168→  // "gone" when its meet-cab for the selected day has already left.
+   169→  const trainOptions = useMemo(() => {
+   170→    const wantDir = direction === "FROM_TERMINUS" ? "NBO_TO_MBA" : "MBA_TO_NBO";
+   171→    return timetable
+   172→      .filter((t) => t.direction === wantDir)
+   173→      .map((t) => {
+   174→        const mtmTime = t.direction === "MBA_TO_NBO" ? t.originTime : t.destTime;
+   175→        const key = `${t.name}-${mtmTime}`;
+   176→        return {
+   177→          key,
+   178→          time: mtmTime,
+   179→          name: t.name,
+   180→          label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
+   181→          gone: trips !== null && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
+   182→        };
+   183→      })
+   184→      .sort((a, b) => a.time.localeCompare(b.time));
+   185→  }, [timetable, direction, trips]);
+   186→
+   187→  const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
+   188→
+   189→  const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
+   190→
+   191→  // Points grid grouped by route (coast), from the stable routes network
+   192→  const pointGroups = useMemo(() => {
+   193→    return routes
+   194→      .map((r) => ({
+   195→        route: r,
+   196→        coast: coastOf(r.name),
+   197→        points: r.stages.filter((s) => s.order > 0),
+   198→      }))
+   199→      .filter((g) => g.points.length > 0);
+   200→  }, [routes]);
+   201→
+   202→  const selectedPoint = useMemo(() => {
+   203→    for (const g of pointGroups) {
+   204→      const p = g.points.find((s) => s.id === pointId);
+   205→      if (p) return { point: p, route: g.route, coast: g.coast };
+   206→    }
+   207→    return null;
+   208→  }, [pointGroups, pointId]);
+   209→
+   210→  // Trips after train + point filters
+   211→  const visibleTrips = useMemo(() => {
+   212→    let list = trips || [];
+   213→    if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
+   214→    if (pointId) list = list.filter((t) => t.stages.some((s) => s.id === pointId));
+   215→    return list;
+   216→  }, [trips, trainKey, pointId]);
+   217→
+   218→  // How many seats can actually be booked on the cabs currently listed?
+   219→  const seatCap = useMemo(() => {
+   220→    if (loading || !visibleTrips.length) return 14;
+   221→    const maxLeft = Math.max(...visibleTrips.map((t) => Math.max(t.seatsLeft, 0)));
+   222→    return Math.max(1, Math.min(14, maxLeft || 14));
+   223→  }, [loading, visibleTrips]);
+   224→
+   225→  useEffect(() => {
+   226→    if (!loading && seats > seatCap) setSeats(seatCap);
+   227→  }, [loading, seatCap, seats]);
+   228→
+   229→  // Live fare preview
+   230→  const previewStage = selectedPoint?.point;
+   231→  const farePreview = useMemo(() => {
+   232→    const base = charter
+   233→      ? selectedPoint?.route.charterPrice ?? 0
+   234→      : (previewStage?.fare || 0) * seats;
+   235→    const surcharge = homePickup
+   236→      ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
+   237→      : 0;
+   238→    return { base, surcharge, total: base + surcharge };
+   239→  }, [charter, previewStage, selectedPoint, seats, homePickup]);
+   240→
+   241→  /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
+   242→
+   243→  if (showSplash) {
+   244→    return <SplashScreen onDone={() => setSplashDone(true)} />;
+   245→  }
+   246→
+   247→  return (
+   248→    <div className="flex min-h-screen flex-col bg-background">
+   249→      <SiteHeader />
+   250→
+   251→      {/* Direction switcher — the signature pill row */}
+   252→      <div className="mx-auto max-w-md w-full px-4 pt-3">
+   253→        <Tabs value={direction} onValueChange={(v) => {
+   254→          setDirection(v as "FROM_TERMINUS" | "TO_TERMINUS");
+   255→          setTrainKey(null);
+   256→        }}>
+   257→          <TabsList className="grid w-full grid-cols-2">
+   258→            <TabsTrigger value="FROM_TERMINUS" className="flex items-center gap-1.5">
+   259→              <Anchor className="h-3.5 w-3.5" /> From Terminus
+   260→            </TabsTrigger>
+   261→            <TabsTrigger value="TO_TERMINUS" className="flex items-center gap-1.5">
+   262→              <Navigation className="h-3.5 w-3.5" /> To Terminus
+   263→            </TabsTrigger>
+   264→          </TabsList>
+   265→        </Tabs>
+   266→      </div>
+   267→      <SiteNav />
+   268→
+   269→      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6">
+   270→        <AnimatePresence mode="wait">
+   271→          <motion.div
+   272→            key={direction}
+   273→            initial={{ opacity: 0, y: 8 }}
+   274→            animate={{ opacity: 1, y: 0 }}
+   275→            exit={{ opacity: 0, y: -8 }}
+   276→            transition={{ duration: 0.18 }}
+   277→            className="space-y-4"
+   278→          >
+   279→            {/* Date */}
+   280→            <div>
+   281→              <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   282→                <CalendarDays className="h-3.5 w-3.5" />
+   283→                {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
+   284→              </div>
+   285→              <DatePicker value={date} onChange={setDate} />
+   286→              <div className="mt-1.5 text-xs text-muted-foreground">
+   287→                Selected: <span className="font-medium text-foreground">{fmtDateShort(date)}</span>
+   288→              </div>
+   289→            </div>
+   290→
+   291→            {/* Train selector */}
+   292→            <div>
+   293→              <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   294→                <TrainIcon className="h-3.5 w-3.5" />
+   295→                {direction === "FROM_TERMINUS" ? "Arriving on which train?" : "Catching which train?"}
+   296→              </div>
+   297→              {trainOptions.length === 0 && !loading && (
+   298→                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+   299→                  Timetable unavailable right now — cabs run to the Madaraka Express schedule (08:00 Inter-County · 15:00 Express · 22:00 Night Train).
+   300→                </p>
+   301→              )}
+   302→              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+   303→                {trainOptions.map((t) => (
+   304→                  <TrainPill
+   305→                    key={t.key}
+   306→                    time={t.time}
+   307→                    label={t.label}
+   308→                    name={t.name}
+   309→                    gone={t.gone}
+   310→                    active={trainKey === t.key}
+   311→                    onClick={() => setTrainKey(trainKey === t.key ? null : t.key)}
+   312→                  />
+   313→                ))}
+   314→              </div>
+   315→            </div>
+   316→
+   317→            {/* Point picker */}
+   318→            <div>
+   319→              <div className="mb-2 flex items-center justify-between">
+   320→                <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   321→                  <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
+   322→                </div>
+   323→                {pointId && (
+   324→                  <button onClick={() => setPointId(null)} className="text-[11px] text-primary hover:underline">
+   325→                    Show all points
+   326→                  </button>
+   327→                )}
+   328→              </div>
+   329→              <div className="space-y-2">
+   330→                {pointGroups.length === 0 && (
+   331→                  <Skeleton className="h-20 w-full" />
+   332→                )}
+   333→                {pointGroups.map(({ route, coast, points }) => (
+   334→                  <div key={route.id}>
+   335→                    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+   336→                      {coast === "south" ? (
+   337→                        <span className="inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[9px] uppercase text-orange-800">
+   338→                          South Coast
+   339→                        </span>
+   340→                      ) : (
+   341→                        <span className="inline-flex rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] uppercase text-emerald-800">
+   342→                          North Coast
+   343→                        </span>
+   344→                      )}
+   345→                      <span>{route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}</span>
+   346→                    </div>
+   347→                    <div className="grid grid-cols-2 gap-1.5">
+   348→                      {points.map((p) => {
+   349→                        const active = pointId === p.id;
+   350→                        return (
+   351→                          <button
+   352→                            key={p.id}
+   353→                            onClick={() => setPointId(active ? null : p.id)}
+   354→                            className={cn(
+   355→                              "rounded-lg border p-2 text-left text-xs transition-all",
+   356→                              active
+   357→                                ? "border-primary bg-primary shadow-sm text-primary-foreground"
+   358→                                : "border-border bg-card hover:bg-accent hover:text-accent-foreground",
+   359→                            )}
+   360→                          >
+   361→                            <div className="truncate font-medium">{p.name}</div>
+   362→                            <div className={cn("mt-0.5 text-[10px]", active ? "opacity-80" : "text-muted-foreground")}>
+   363→                              KSh {p.fare} · door +{p.homeSurcharge}
+   364→                            </div>
+   365→                          </button>
+   366→                        );
+   367→                      })}
+   368→                    </div>
+   369→                  </div>
+   370→                ))}
+   371→              </div>
+   372→            </div>
+   373→
+   374→            {/* Options: door-to-door + charter + live fare preview */}
+   375→            <Card className="border-primary/30 bg-primary/5">
+   376→              <CardHeader className="pb-2">
+   377→                <CardTitle className="flex items-center gap-1.5 text-sm">
+   378→                  <Car className="h-4 w-4" /> {pointLabelCap} options
+   379→                </CardTitle>
+   380→              </CardHeader>
+   381→              <CardContent className="space-y-3 pt-0">
+   382→                {/* Door-to-door toggle */}
+   383→                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+   384→                  <div className="flex-1">
+   385→                    <Label className="flex items-center gap-1 text-sm font-medium">
+   386→                      <HomeIcon className="h-4 w-4" /> Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}
+   387→                    </Label>
+   388→                    <p className="mt-1 text-[11px] text-muted-foreground">
+   389→                      {selectedPoint
+   390→                        ? `+${ksh(selectedPoint.point.homeSurcharge)}/seat — passes to your driver in full.`
+   391→                        : "Pick a point first to see its door surcharge."}
+   392→                    </p>
+   393→                  </div>
+   394→                  <Switch checked={homePickup} onCheckedChange={setHomePickup} aria-label="Door-to-door" />
+   395→                </div>
+   396→
+   397→                {/* Charter toggle */}
+   398→                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+   399→                  <div className="flex-1">
+   400→                    <Label className="flex items-center gap-1 text-sm font-medium">
+   401→                      <Crown className="h-4 w-4 text-violet-600" /> Book the whole vehicle (private)
+   402→                    </Label>
+   403→                    <p className="mt-1 text-[11px] text-muted-foreground">
+   404→                      Reserve the entire cab for your family or group — no other passengers join.
+   405→                    </p>
+   406→                  </div>
+   407→                  <Switch
+   408→                    checked={charter}
+   409→                    onCheckedChange={(c) => {
+   410→                      setCharter(c);
+   411→                      if (c) setHomePickup(false);
+   412→                    }}
+   413→                    aria-label="Charter"
+   414→                  />
+   415→                </div>
+   416→
+   417→                {/* Live fare preview */}
+   418→                <div className="space-y-1.5 rounded-lg border bg-card p-3">
+   419→                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Live fare preview</div>
+   420→                  <div className="space-y-1 text-xs">
+   421→                    <Row
+   422→                      label={charter ? "Charter (whole cab)" : `Base (per seat${selectedPoint ? ` · ${selectedPoint.point.name}` : ""})`}
+   423→                      value={selectedPoint || charter ? ksh(charter ? (selectedPoint?.route.charterPrice ?? 0) : (previewStage?.fare || 0)) : "—"}
+   424→                    />
+   425→                    {homePickup && selectedPoint && (
+   426→                      <Row label={`Door-to-door surcharge${charter ? "" : ` × ${seats}`}`} value={`+${ksh(previewStage?.homeSurcharge || 0)}${charter ? "" : ` × ${seats}`}`} />
+   427→                    )}
+   428→                    {!charter && seats > 1 && selectedPoint && <Row label={`Seats × ${seats}`} value={`${ksh(previewStage?.fare || 0)} × ${seats}`} />}
+   429→                  </div>
+   430→                  <div className="flex items-center justify-between border-t pt-1.5">
+   431→                    <span className="text-sm font-medium">
+   432→                      Total {charter ? "(whole cab)" : seats > 1 ? `(${seats} seats)` : ""}
+   433→                    </span>
+   434→                    <span className="text-lg font-bold tabular-nums text-primary">
+   435→                      {selectedPoint || charter ? ksh(farePreview.total) : "—"}
+   436→                    </span>
+   437→                  </div>
+   438→                </div>
+   439→              </CardContent>
+   440→            </Card>
+   441→
+   442→            {/* Seats (pooled only) */}
+   443→            {!charter && (
+   444→              <div>
+   445→                <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   446→                  <Users className="h-3.5 w-3.5" /> How many seats?
+   447→                </div>
+   448→                <SeatStepper value={seats} onChange={setSeats} min={1} max={seatCap} />
+   449→                {!loading && visibleTrips.length > 0 && (
+   450→                  <p className="mt-1 text-[11px] text-muted-foreground">
+   451→                    Up to {seatCap} {seatCap === 1 ? "seat" : "seats"} can be booked on the cabs listed below.
+   452→                  </p>
+   453→                )}
+   454→              </div>
+   455→            )}
+   456→
+   457→            {/* Available cabs */}
+   458→            <div className="space-y-2">
+   459→              <div className="flex items-center justify-between">
+   460→                <h3 className="text-sm font-medium">
+   461→                  {charter ? "Available for charter" : "Available pooled cabs"}
+   462→                </h3>
+   463→                <span className="text-xs text-muted-foreground">{loading ? "…" : `${visibleTrips.length} cabs`}</span>
+   464→              </div>
+   465→
+   466→              {loading && (
+   467→                <div className="space-y-2">
+   468→                  <Skeleton className="h-36 w-full" />
+   469→                  <Skeleton className="h-36 w-full" />
+   470→                </div>
+   471→              )}
+   472→
+   473→              {!loading && visibleTrips.length === 0 && (
+   474→                <Card>
+   475→                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+   476→                    {selectedTrainGone
+   477→                      ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
+   478→                      : pointId
+   479→                        ? "No cabs serve this point for that train. Try another point or \"Show all points\"."
+   480→                        : "No cabs posted for this train yet."}
+   481→                  </CardContent>
+   482→                </Card>
+   483→              )}
+   484→
+   485→              {!loading &&
+   486→                visibleTrips.map((trip) => (
+   487→                  <motion.div key={trip.id} layout whileTap={{ scale: 0.99 }}>
+   488→                    <CabCard
+   489→                      trip={trip}
+   490→                      pointName={selectedPoint?.point.name}
+   491→                      pointFare={selectedPoint?.point.fare}
+   492→                      seats={seats}
+   493→                      charter={charter}
+   494→                      onBook={() => openBooking(trip)}
+   495→                    />
+   496→                  </motion.div>
+   497→                ))}
+   498→            </div>
+   499→
+   500→            {/* How it works */}
+   501→            <Card className="border-dashed">
+   502→              <CardHeader className="pb-2">
+   503→                <CardTitle className="flex items-center gap-1.5 text-xs">
+   504→                  <Info className="h-3.5 w-3.5" /> How points &amp; fares work
+   505→                </CardTitle>
+   506→              </CardHeader>
+   507→              <CardContent className="space-y-1.5 pt-0 text-xs text-muted-foreground">
+   508→                <p>
+   509→                  Cabs meet every Madaraka Express at Mombasa Terminus. {direction === "FROM_TERMINUS" ? "Choose your drop-off point — the cab drops you there on the way from the terminus." : "Choose your pickup point and be there 10 minutes before the cab leaves for the terminus."}
+   510→                </p>
+   511→                <p>
+   512→                  Shared-ride fare is <span className="font-medium text-foreground">KSh 400</span> per seat upcountry (Malindi 700, Diani Naivas 500). Door-to-door adds the point&apos;s surcharge, which goes to your driver in full.
+   513→                </p>
+   514→                <p>Private charter = the whole cab. Cancel before lock for a full refund; after lock, fares become 30-day travel credit.</p>
+   515→              </CardContent>
+   516→            </Card>
+   517→
+   518→            {/* My bookings */}
+   519→            {myBookings.length > 0 && (
+   520→              <div className="space-y-2 pt-2">
+   521→                <h3 className="flex items-center gap-1.5 text-sm font-medium">
+   522→                  <TicketIcon className="h-4 w-4" /> My bookings
+   523→                </h3>
+   524→                {myBookings.map((b) => (
+   525→                  <Card key={b.id} className={cn(b.isCharter && "border-violet-300 bg-violet-50/30", b.status === "awaiting_payment" && "border-amber-300 bg-amber-50/30")}>
+   526→                    <CardContent className="flex items-center justify-between gap-3 p-3">
+   527→                      <div className="min-w-0">
+   528→                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+   529→                          <span>{b.stageName ?? b.code}</span>
+   530→                          {b.isCharter && <CharterBadge />}
+   531→                          <DotBadge status={b.status} />
+   532→                        </div>
+   533→                        <div className="mt-0.5 text-xs text-muted-foreground">
+   534→                          {b.departureAt ? fmtTime(b.departureAt) : "awaiting allocation"}
+   535→                          {b.driver ? ` · ${b.driver.name} · ${b.driver.plate}` : ""}
+   536→                        </div>
+   537→                        <div className="mt-0.5 text-xs font-medium">
+   538→                          {ksh(b.cashDue)}
+   539→                          {b.status === "awaiting_payment" && <span className="font-normal text-muted-foreground"> by M-Pesa</span>}
+   540→                        </div>
+   541→                      </div>
+   542→                      {b.status === "awaiting_payment" ? (
+   543→                        <Button size="sm" className="h-8 shrink-0" onClick={() => setPayFor(b)}>
+   544→                          Pay now
+   545→                        </Button>
+   546→                      ) : (
+   547→                        <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={() => router.push("/bookings")}>
+   548→                          Manage
+   549→                        </Button>
+   550→                      )}
+   551→                    </CardContent>
+   552→                  </Card>
+   553→                ))}
+   554→              </div>
+   555→            )}
+   556→          </motion.div>
+   557→        </AnimatePresence>
+   558→      </main>
+   559→
+   560→      <SiteFooter />
+   561→
+   562→      <BookingSheet
+   563→        open={sheetOpen}
+   564→        onClose={() => {
+   565→          setSheetOpen(false);
+   566→          loadTrips(direction, date);
+   567→          loadMyBookings();
+   568→        }}
+   569→        draft={draft}
+   570→        onBooked={() => {
+   571→          loadTrips(direction, date);
+   572→          loadMyBookings();
+   573→        }}
+   574→      />
+   575→
+   576→      {payFor && (
+   577→        <PaySheet
+   578→          open={!!payFor}
+   579→          onClose={() => {
+   580→            setPayFor(null);
+   581→            loadMyBookings();
+   582→          }}
+   583→          booking={{
+   584→            id: payFor.id,
+   585→            code: payFor.code,
+   586→            cashDue: payFor.cashDue,
+   587→            stageName: payFor.stageName,
+   588→            departureAt: payFor.departureAt,
+   589→          }}
+   590→          onPaid={loadMyBookings}
+   591→        />
+   592→      )}
+   593→    </div>
+   594→  );
+   595→}
+   596→
+   597→function Row({ label, value }: { label: string; value: string }) {
+   598→  return (
+   599→    <div className="flex items-center justify-between">
+   600→      <span className="text-muted-foreground">{label}</span>
+   601→      <span className="font-medium tabular-nums">{value}</span>
+   602→    </div>
+   603→  );
+   604→}
+   605→
+   606→function CabCard({
+   607→  trip,
+   608→  pointName,
+   609→  pointFare,
+   610→  seats,
+   611→  charter,
+   612→  onBook,
+   613→}: {
+   614→  trip: BookableTrip;
+   615→  pointName?: string;
+   616→  pointFare?: number;
+   617→  seats: number;
+   618→  charter: boolean;
+   619→  onBook: () => void;
+   620→}) {
+   621→  const booked = trip.capacity - trip.seatsLeft;
+   622→  const fare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+   623→  const full = trip.seatsLeft <= 0 || !trip.bookable;
+   624→
+   625→  return (
+   626→    <Card className="overflow-hidden">
+   627→      <CardContent className="space-y-2.5 p-3">
+   628→        <div className="flex items-start justify-between gap-2">
+   629→          <div className="min-w-0 flex-1">
+   630→            <div className="flex flex-wrap items-center gap-2">
+   631→              <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
+   632→              <DotBadge status={trip.status} />
+   633→              {trip.status === "locked" && (
+   634→                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+   635→                  <Sparkles className="h-2.5 w-2.5" /> credits only
+   636→                </span>
+   637→              )}
+   638→            </div>
+   639→            {trip.driver && (
+   640→              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+   641→                <span>{trip.driver.name}</span>
+   642→                <Stars rating={trip.driver.rating} />
+   643→                <span className="text-muted-foreground/50">•</span>
+   644→                <span className="font-mono">{trip.driver.plate}</span>
+   645→              </div>
+   646→            )}
+   647→            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+   648→              <Clock className="h-3 w-3" />
+   649→              {trip.direction === "TO_TERMINUS"
+   650→                ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
+   651→                : `Cab departs ${fmtTime(trip.departureAt)}`}
+   652→            </div>
+   653→          </div>
+   654→          <div className="shrink-0 text-right">
+   655→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+   656→              {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
+   657→            </div>
+   658→            <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
+   659→            {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
+   660→              <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
+   661→            )}
+   662→          </div>
+   663→        </div>
+   664→
+   665→        <div className="flex items-center justify-between gap-3">
+   666→          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+   667→            {trip.train && (
+   668→              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+   669→                <TrainIcon className="h-3 w-3" />
+   670→                {trip.direction === "FROM_TERMINUS"
+   671→                  ? `Meets the ${trip.train.name} · MTM ${trip.train.mtmTime}`
+   672→                  : `Catches the ${trip.train.name} · MTM ${trip.train.mtmTime}`}
+   673→              </span>
+   674→            )}
+   675→            {trip.direction === "TO_TERMINUS" && (
+   676→              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+   677→                <Navigation className="h-3 w-3" /> reaches MTM {fmtTime(trip.terminusAt)}
+   678→              </span>
+   679→            )}
+   680→          </div>
+   681→          <SeatMeter booked={booked} capacity={trip.capacity} />
+   682→        </div>
+   683→
+   684→        <Button className="h-9 w-full" size="sm" disabled={full} onClick={onBook}>
+   685→          {full
+   686→            ? trip.seatsLeft <= 0
+   687→              ? "Not enough seats"
+   688→              : "Unavailable"
+   689→            : charter
+   690→              ? `Book charter · ${ksh(trip.charterPrice)}`
+   691→              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
+   692→        </Button>
+   693→      </CardContent>
+   694→    </Card>
+   695→  );
+   696→}
+   697→

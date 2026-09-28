@@ -6,6 +6,16 @@ import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
 import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
 
+/** Statuses that count towards the guest booking limit — a cancelled booking
+ *  frees the guest to rebook their single no-login seat. */
+const GUEST_COUNTING_STATUSES = {
+  status: { notIn: ["cancelled"] },
+};
+
+/** The exact rule copy shown to guests who try to go past the 1-seat limit. */
+export const GUEST_LIMIT_ERROR =
+  "You can only book up to 1 seat without logging in. Login to book more seats.";
+
 /** My bookings */
 export async function GET() {
   const session = await getPassengerSession();
@@ -87,18 +97,45 @@ export async function POST(req: NextRequest) {
     isCharter = false,
     applyCredit = false,
     travelDate, // YYYY-MM-DD (the day the passenger wants to travel)
-    passengerName, // guest checkout — no account needed
+    passengerName, // primary passenger — full name
     passengerPhone, // doubles as the default M-Pesa number
+    passengerEmail, // contact info
+    passengerIdType, // "id" | "passport"
+    passengerIdNumber, // national ID or passport number
+    passengerNationality, // dropdown value from /lib/nationalities
+    passengerGender, // "male" | "female" | "other"
   } = body;
 
-  // Guest checkout details (Tahmeed-style): anyone can book and pay without
-  // signing in — we just need to know who is travelling and how to reach them.
-  const guestName = String(passengerName || "").trim();
-  if (guestName.length < 2) {
-    return NextResponse.json({ error: "Enter the passenger's full name" }, { status: 400 });
+  // ── Primary passenger details (required for every booking) ────────────────
+  const fullName = String(passengerName || "").trim();
+  if (fullName.length < 2 || !fullName.includes(" ")) {
+    return NextResponse.json(
+      { error: "Enter the passenger's full name (first and last name)" },
+      { status: 400 },
+    );
   }
-  const guestPhone = toMpesaMsISDN(String(passengerPhone || ""));
-  if (!guestPhone) {
+  const idType = passengerIdType === "passport" ? "passport" : "id";
+  const idNumber = String(passengerIdNumber || "").trim();
+  if (idNumber.length < 4) {
+    return NextResponse.json(
+      { error: `Enter a valid ${idType === "passport" ? "passport number" : "ID number"}` },
+      { status: 400 },
+    );
+  }
+  const nationality = String(passengerNationality || "").trim();
+  if (!nationality) {
+    return NextResponse.json({ error: "Select your nationality" }, { status: 400 });
+  }
+  const gender = String(passengerGender || "").trim().toLowerCase();
+  if (!gender) {
+    return NextResponse.json({ error: "Select your gender" }, { status: 400 });
+  }
+  const email = String(passengerEmail || "").trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
+  const phone = toMpesaMsISDN(String(passengerPhone || ""));
+  if (!phone) {
     return NextResponse.json(
       { error: "Enter a valid M-Pesa number (07XX XXX XXX or 2547XX XXX XXX)" },
       { status: 400 },
@@ -119,6 +156,36 @@ export async function POST(req: NextRequest) {
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
   const total = fare + homeSurcharge;
 
+  // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
+  // a Mi-Reli account created with the exact same details. ─────────────────
+  const passenger = await db.passenger.findUnique({ where: { id: session.id } });
+  const isGuest = !!passenger && passenger.phone.startsWith("guest-");
+  if (isGuest) {
+    const priorBookings = await db.booking.count({
+      where: { passengerId: session.id, ...GUEST_COUNTING_STATUSES },
+    });
+    if (priorBookings > 0 || tripSeats > 1 || isCharter) {
+      return NextResponse.json(
+        { error: GUEST_LIMIT_ERROR, code: "GUEST_LIMIT" },
+        { status: 403 },
+      );
+    }
+  } else if (passenger) {
+    // Signed-in account — keep the profile in sync with the details they book
+    // with, so future bookings prefill identically.
+    await db.passenger.update({
+      where: { id: passenger.id },
+      data: {
+        name: fullName.slice(0, 80),
+        email,
+        idType,
+        idNumber,
+        nationality,
+        gender,
+      },
+    });
+  }
+
   const booking = await db.booking.create({
     data: {
       code: generateBookingCode(),
@@ -136,8 +203,13 @@ export async function POST(req: NextRequest) {
       creditApplied: 0,
       cashDue: total,
       status: "awaiting_payment",
-      passengerName: guestName.slice(0, 80),
-      passengerPhone: guestPhone,
+      passengerName: fullName.slice(0, 80),
+      passengerPhone: phone,
+      passengerEmail: email,
+      passengerIdType: idType,
+      passengerIdNumber: idNumber,
+      passengerNationality: nationality.slice(0, 60),
+      passengerGender: gender,
     },
   });
 
@@ -172,7 +244,7 @@ export async function POST(req: NextRequest) {
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: guestName, passengerPhone: guestPhone },
+    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.

@@ -451,6 +451,11 @@ export default function Home() {
                     Up to {seatCap} {seatCap === 1 ? "seat" : "seats"} can be booked on the cabs listed below.
                   </p>
                 )}
+                {me?.passenger?.isGuest && (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    You can only book up to 1 seat without logging in. Login to book more seats.
+                  </p>
+                )}
               </div>
             )}
 

@@ -188,3 +188,25 @@ Work Log:
 
 Stage Summary:
 - Driver identity (name + plate + rating) answers "who picks me up" from the first glance, while the actual phone number unlocks only with the receipt — protecting drivers from spam while keeping paid passengers fully reachable.
+
+---
+Task ID: 12
+Agent: Super Z (main agent)
+Task: Booking rules — guest 1-seat limit, Primary Passenger form (Full Name, ID/Passport, Nationality dropdown, Gender, Email, Phone), straight-to-payment, and exact-details account signup; user specifically asked for a nationality dropdown with more than Kenyan.
+
+Work Log:
+- Schema: Passenger += idType/idNumber/nationality/gender; Booking += passengerEmail/passengerIdType/passengerIdNumber/passengerNationality/passengerGender (per-booking manifest snapshot). prisma db push + generate.
+- New src/lib/nationalities.ts: grouped nationality list (East Africa, Africa, Europe, Americas, Asia & Middle East, Oceania, Other) — Kenya first as default, ~140 options.
+- /api/bookings POST: required Primary Passenger validation (full name w/ space, ID/passport >=4 chars, nationality, gender, email, M-Pesa phone); guest enforcement — session passenger with guest- phone prefix is limited to 1 non-cancelled booking of exactly 1 seat (charter requires account too) -> 403 {code: GUEST_LIMIT, error: "You can only book up to 1 seat without logging in. Login to book more seats."}; signed-in accounts sync profile from booking details; booking stores all snapshot fields.
+- /api/me: returns profile fields + isGuest + guestUsed (non-cancelled booking count > 0).
+- /api/auth new step "signup": validates same fields + 4-digit code; upgrades guest row in place (phone/name/email/id/nationality/gender) OR claims an existing account when phone exists AND all details match exactly (case-insensitive) — reassigning guest bookings+credits to the claimed account and deleting the guest row; mismatch -> 409 with exact-details guidance. Audit actions auth.signup / auth.claim.
+- client.ts: Me.passenger extended; PassengerDetails type + detailsComplete() + isValidMpesaPhone helpers.
+- booking-sheet.tsx rebuilt: "Primary passenger" section with Personal details (Full name; National ID/Passport select + number; Nationality grouped Select defaulting Kenyan; Gender select Female/Male/Other) and Contact info (Email, M-Pesa phone); amber GUEST_LIMIT notice with exact rule copy + "Login to book more seats" button when guest is blocked (seats>1, charter, or guestUsed); footer swaps to guidance text; localStorage prefill extended to all fields; account users prefill from profile.
+- New auth-sheet.tsx: two-step signup (details prefilled with exact same values -> OTP verify) wired to /api/auth signup.
+- page.tsx: muted rule hint under SeatStepper for guests.
+- Fixed en route: GUEST_COUNTING_STATUSES spread bug (notIn must nest under status); duplicate useMe() in BookingSheet meant refresh() never updated me (signup appeared to not clear the block) — merged to one hook; missing getPassengerSession import in auth route; isValidMpesaPhone typo.
+- E2E API (scripts/e2e-guest-rule.sh): guest 2 seats -> 403 GUEST_LIMIT; guest 1 seat -> MR-LFQ2X4 confirmed (welcome credit); second guest booking -> 403; signup exact details -> ok, isGuest false, nationality Ugandan carried; account books 2 seats -> MR-JB5VTA; both bookings on account.
+- E2E browser: nationality dropdown renders full grouped list; form -> straight to M-Pesa PaySheet (254701112223); fresh guest + 2 seats shows amber rule notice + login button; AuthSheet prefilled with exact same details; signup claimed existing Grace Achieng account (credit merged 100+100=200) -> Reserve 2 seats -> PaySheet KSh 800; zero page errors; tsc clean.
+
+Stage Summary:
+- Booking rules live: guests get exactly 1 seat/1 booking; more requires a Mi-Reli account created with the exact same details; Primary Passenger form (with world nationality dropdown, Kenya default) feeds booking + profile; payment follows immediately. Nationality data in src/lib/nationalities.ts is the single place to extend options.

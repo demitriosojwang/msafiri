@@ -4,9 +4,51 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface Me {
   session: { id: string; name: string; identifier: string } | null;
-  passenger?: { id: string; name: string | null; phone: string };
+  passenger?: {
+    id: string;
+    name: string | null;
+    phone: string;
+    email: string | null;
+    idType: string | null;
+    idNumber: string | null;
+    nationality: string | null;
+    gender: string | null;
+    isGuest: boolean;
+    guestUsed: boolean;
+  };
   creditBalance?: number;
   activeCredits?: number;
+}
+
+/** The Primary Passenger details collected by the booking form. Shared by the
+ *  booking sheet and the signup sheet (which must repeat the exact same
+ *  details to create a Mi-Reli account). */
+export interface PassengerDetails {
+  fullName: string;
+  idType: "id" | "passport";
+  idNumber: string;
+  nationality: string;
+  gender: string;
+  email: string;
+  phone: string;
+}
+
+export function detailsComplete(d: PassengerDetails): boolean {
+  return (
+    d.fullName.trim().length >= 2 &&
+    d.fullName.trim().includes(" ") &&
+    d.idNumber.trim().length >= 4 &&
+    d.nationality.trim() !== "" &&
+    d.gender.trim() !== "" &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email.trim()) &&
+    isValidMpesaPhone(d.phone)
+  );
+}
+
+/** Loose client-side check mirroring the server's toMpesaMsISDN. */
+export function isValidMpesaPhone(input: string): boolean {
+  const digits = input.replace(/\D/g, "");
+  return /^(?:254|0)?(?:7|1)\d{8}$/.test(digits);
 }
 
 export async function api<T = unknown>(

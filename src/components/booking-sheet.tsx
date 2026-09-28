@@ -14,10 +14,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PaySheet } from "@/components/pay-sheet";
-import { api, useMe } from "@/lib/client";
+import { AuthSheet } from "@/components/auth-sheet";
+import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock } from "lucide-react";
+import { NATIONALITY_GROUPS, DEFAULT_NATIONALITY } from "@/lib/nationalities";
+import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
 export interface Stage {
@@ -86,23 +97,34 @@ interface CreateResponse {
   };
 }
 
-/** Tahmeed-style guest checkout: the last details typed on this device prefill
- *  the next booking — convenience only, never an account. */
+const GUEST_LIMIT_COPY =
+  "You can only book up to 1 seat without logging in. Login to book more seats.";
+
+/** Primary-passenger details typed on this device prefill the next booking —
+ *  convenience only, never an account. */
 const GUEST_KEY = "mireli.guest";
 
-function loadGuest(): { name: string; phone: string } {
-  if (typeof window === "undefined") return { name: "", phone: "" };
+const EMPTY_DETAILS: PassengerDetails = {
+  fullName: "",
+  idType: "id",
+  idNumber: "",
+  nationality: DEFAULT_NATIONALITY,
+  gender: "",
+  email: "",
+  phone: "",
+};
+
+function loadGuestDetails(): PassengerDetails {
+  if (typeof window === "undefined") return { ...EMPTY_DETAILS };
   try {
     const raw = window.localStorage.getItem(GUEST_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { ...EMPTY_DETAILS, ...JSON.parse(raw) };
   } catch {}
-  return { name: "", phone: "" };
+  return { ...EMPTY_DETAILS };
 }
 
-/** Loose client-side check mirroring the server's toMpesaMsISDN. */
-function isValidMpesaPhone(input: string): boolean {
-  const d = input.replace(/\D/g, "");
-  return /^(?:254|0)?(?:7|1)\d{8}$/.test(d);
+function blankToDefault(d: PassengerDetails): PassengerDetails {
+  return { ...d, nationality: d.nationality || DEFAULT_NATIONALITY };
 }
 
 export function BookingSheet({
@@ -116,44 +138,66 @@ export function BookingSheet({
   draft: BookingDraft | null;
   onBooked: () => void;
 }) {
-  const { refresh } = useMe();
+  const { me, refresh } = useMe();
+  const creditBalance = me?.creditBalance || 0;
   const [homeAddress, setHomeAddress] = useState("");
   const [useCredit, setUseCredit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateResponse["booking"] | null>(null);
   const [payOpen, setPayOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [details, setDetails] = useState<PassengerDetails>({ ...EMPTY_DETAILS });
 
-  const { me } = useMe();
-  const creditBalance = me?.creditBalance || 0;
-  const [guestName, setGuestName] = useState("");
-  const [guestPhone, setGuestPhone] = useState("");
-
+  // Prefill: signed-in accounts prefill from their profile, guests from the
+  // last details typed on this device.
   useEffect(() => {
-    if (open && draft) {
-      setHomeAddress(draft.homeAddress || "");
-      setUseCredit(draft.useCredit);
-      setError(null);
-      setCreated(null);
-      setPayOpen(false);
-      const g = loadGuest();
-      setGuestName(g.name || "");
-      setGuestPhone(g.phone || "");
+    if (!open || !draft) return;
+    setHomeAddress(draft.homeAddress || "");
+    setUseCredit(draft.useCredit);
+    setError(null);
+    setCreated(null);
+    setPayOpen(false);
+    setAuthOpen(false);
+    const p = me?.passenger;
+    if (p && !p.isGuest) {
+      setDetails({
+        fullName: p.name || "",
+        idType: p.idType === "passport" ? "passport" : "id",
+        idNumber: p.idNumber || "",
+        nationality: p.nationality || DEFAULT_NATIONALITY,
+        gender: p.gender || "",
+        email: p.email || "",
+        phone: p.phone || "",
+      });
+    } else {
+      setDetails(blankToDefault(loadGuestDetails()));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draft]);
 
   const trip = draft?.trip;
   const stage = useMemo(() => trip?.stages.find((s) => s.id === draft?.stageId), [trip, draft?.stageId]);
+
+  const isGuest = me?.passenger?.isGuest ?? true;
+  const guestUsed = me?.passenger?.guestUsed ?? false;
 
   const fare = trip ? (draft?.charter ? trip.charterPrice : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
   const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
   const total = fare + surcharge;
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
-  const guestDetailsOk = guestName.trim().length >= 2 && isValidMpesaPhone(guestPhone);
+  const detailsOk = detailsComplete(details);
+
+  /** Guests: 1 seat, 1 booking — anything more needs a Mi-Reli account. */
+  const guestBlocked = isGuest && (guestUsed || (draft?.seats ?? 1) > 1 || draft?.charter);
+
+  function set<K extends keyof PassengerDetails>(key: K, value: PassengerDetails[K]) {
+    setDetails((d) => ({ ...d, [key]: value }));
+  }
 
   async function confirm() {
-    if (!trip || !draft || !guestDetailsOk) return;
+    if (!trip || !draft || !detailsOk) return;
     setBusy(true);
     setError(null);
     try {
@@ -168,12 +212,17 @@ export function BookingSheet({
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
           travelDate: trip.departureAt.slice(0, 10),
-          passengerName: guestName.trim(),
-          passengerPhone: guestPhone,
+          passengerName: details.fullName.trim(),
+          passengerPhone: details.phone,
+          passengerEmail: details.email.trim(),
+          passengerIdType: details.idType,
+          passengerIdNumber: details.idNumber.trim(),
+          passengerNationality: details.nationality,
+          passengerGender: details.gender,
         },
       });
       try {
-        window.localStorage.setItem(GUEST_KEY, JSON.stringify({ name: guestName.trim(), phone: guestPhone }));
+        window.localStorage.setItem(GUEST_KEY, JSON.stringify({ ...details, fullName: details.fullName.trim(), email: details.email.trim() }));
       } catch {}
       setCreated(res.booking);
       await refresh();
@@ -186,6 +235,12 @@ export function BookingSheet({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onAuthed() {
+    setAuthOpen(false);
+    await refresh();
+    setError(null);
   }
 
   if (!trip || !draft) return null;
@@ -334,32 +389,117 @@ export function BookingSheet({
                 </div>
               )}
 
-              {/* Guest checkout — who is travelling? No account needed. */}
-              <div className="space-y-2 rounded-lg border bg-card p-3">
+              {/* Primary passenger — personal details + contact info. */}
+              <div className="space-y-3 rounded-lg border bg-card p-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-1 text-xs">
-                    <UserRound className="h-3 w-3" /> Your details
+                    <UserRound className="h-3 w-3" /> Primary passenger
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">book as a guest — no account needed</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {isGuest ? "book as a guest — no account needed" : "details from your account"}
+                  </span>
                 </div>
-                <Input
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  placeholder="Full name (as the driver should know you)"
-                  className="h-9"
-                  autoComplete="name"
-                />
-                <Input
-                  value={guestPhone}
-                  onChange={(e) => setGuestPhone(e.target.value)}
-                  placeholder="M-Pesa number · 07XX XXX XXX"
-                  inputMode="tel"
-                  className="h-9"
-                  autoComplete="tel"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  We reach this number with the M-Pesa prompt and pickup updates. Your name goes on the seat list the driver sees.
-                </p>
+
+                {guestBlocked && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+                    <p className="font-medium">{GUEST_LIMIT_COPY}</p>
+                    <p className="mt-1 text-amber-800">
+                      Create your Mi-Reli account with the exact same details you booked with — your rides and credit carry over.
+                    </p>
+                    <Button size="sm" className="mt-2 h-8 w-full" onClick={() => setAuthOpen(true)}>
+                      <LogIn className="mr-1 h-3.5 w-3.5" /> Login to book more seats
+                    </Button>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Personal details</Label>
+                  <Input
+                    value={details.fullName}
+                    onChange={(e) => set("fullName", e.target.value)}
+                    placeholder="Full name (as on your ID)"
+                    className="h-9"
+                    autoComplete="name"
+                  />
+                  <div className="grid grid-cols-[110px_1fr] gap-2">
+                    <Select value={details.idType} onValueChange={(v) => set("idType", v as PassengerDetails["idType"])}>
+                      <SelectTrigger className="h-9 w-full text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="id">National ID</SelectItem>
+                        <SelectItem value="passport">Passport</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={details.idNumber}
+                      onChange={(e) => set("idNumber", e.target.value)}
+                      placeholder={details.idType === "passport" ? "Passport number" : "ID number"}
+                      className="h-9"
+                      inputMode="text"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Nationality</Label>
+                      <Select value={details.nationality || DEFAULT_NATIONALITY} onValueChange={(v) => set("nationality", v)}>
+                        <SelectTrigger className="h-9 w-full text-xs">
+                          <SelectValue placeholder="Select nationality" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {NATIONALITY_GROUPS.map((g) => (
+                            <SelectGroup key={g.group}>
+                              <SelectLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">{g.group}</SelectLabel>
+                              {g.options.map((n) => (
+                                <SelectItem key={n} value={n} className="text-xs">
+                                  {n}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Gender</Label>
+                      <Select value={details.gender || undefined} onValueChange={(v) => set("gender", v)}>
+                        <SelectTrigger className="h-9 w-full text-xs">
+                          <SelectValue placeholder="Select gender" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="female" className="text-xs">Female</SelectItem>
+                          <SelectItem value="male" className="text-xs">Male</SelectItem>
+                          <SelectItem value="other" className="text-xs">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator className="my-0.5" />
+
+                <div className="space-y-2">
+                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Contact info</Label>
+                  <Input
+                    type="email"
+                    value={details.email}
+                    onChange={(e) => set("email", e.target.value)}
+                    placeholder="Email address"
+                    className="h-9"
+                    autoComplete="email"
+                  />
+                  <Input
+                    value={details.phone}
+                    onChange={(e) => set("phone", e.target.value)}
+                    placeholder="M-Pesa number · 07XX XXX XXX"
+                    inputMode="tel"
+                    className="h-9"
+                    autoComplete="tel"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    We reach this number with the M-Pesa prompt and pickup updates. Your name goes on the seat list the driver sees.
+                  </p>
+                </div>
               </div>
 
               {/* Fare breakdown */}
@@ -406,19 +546,32 @@ export function BookingSheet({
 
           {!created && (
             <SheetFooter className="px-4 pb-4">
-              <Button className="h-11 w-full" disabled={busy || !draft.stageId || !guestDetailsOk} onClick={confirm}>
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : isCharter ? (
-                  `Book charter · ${ksh(total)}`
-                ) : (
-                  `Reserve ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
-                )}
-              </Button>
+              {guestBlocked ? (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Fill in your details, then login or sign up to complete this booking.
+                </p>
+              ) : (
+                <Button className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isCharter ? (
+                    `Book charter · ${ksh(total)}`
+                  ) : (
+                    `Reserve ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
+                  )}
+                </Button>
+              )}
             </SheetFooter>
           )}
         </SheetContent>
       </Sheet>
+
+      <AuthSheet
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        initialDetails={details}
+        onAuthed={onAuthed}
+      />
 
       {created && (
         <PaySheet
