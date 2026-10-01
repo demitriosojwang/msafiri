@@ -17,9 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -27,7 +25,7 @@ import { PaySheet } from "@/components/pay-sheet";
 import { AuthSheet } from "@/components/auth-sheet";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { NATIONALITY_GROUPS, DEFAULT_NATIONALITY } from "@/lib/nationalities";
+import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -447,15 +445,10 @@ export function BookingSheet({
                           <SelectValue placeholder="Select nationality" />
                         </SelectTrigger>
                         <SelectContent className="max-h-64">
-                          {NATIONALITY_GROUPS.map((g) => (
-                            <SelectGroup key={g.group}>
-                              <SelectLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">{g.group}</SelectLabel>
-                              {g.options.map((n) => (
-                                <SelectItem key={n} value={n} className="text-xs">
-                                  {n}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
+                          {NATIONALITIES.map((n) => (
+                            <SelectItem key={n} value={n} className="text-xs">
+                              {n}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

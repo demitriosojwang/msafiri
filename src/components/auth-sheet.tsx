@@ -15,14 +15,12 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { api, detailsComplete, type PassengerDetails } from "@/lib/client";
-import { NATIONALITY_GROUPS, DEFAULT_NATIONALITY } from "@/lib/nationalities";
+import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
 import { ArrowRight, Loader2, ShieldCheck, UserRoundCheck } from "lucide-react";
 
 /**
@@ -138,15 +136,10 @@ export function AuthSheet({
                       <SelectValue placeholder="Select nationality" />
                     </SelectTrigger>
                     <SelectContent className="max-h-64">
-                      {NATIONALITY_GROUPS.map((g) => (
-                        <SelectGroup key={g.group}>
-                          <SelectLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">{g.group}</SelectLabel>
-                          {g.options.map((n) => (
-                            <SelectItem key={n} value={n} className="text-xs">
-                              {n}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
+                      {NATIONALITIES.map((n) => (
+                        <SelectItem key={n} value={n} className="text-xs">
+                          {n}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
