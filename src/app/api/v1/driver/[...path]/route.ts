@@ -8,6 +8,8 @@ import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {supportCases,createSupportCase} from "@/lib/driver/support";
 import {driverTrips,driverTripCommand} from "@/lib/driver/trips";
 import {requestPayoutDestination} from "@/lib/driver/beneficiary";
+import {after} from "next/server";
+import {dispatchInstantPayouts} from "@/lib/money";
 
 export const runtime="nodejs";
 type Context={params:Promise<{path:string[]}>};
@@ -36,7 +38,10 @@ async function handler(req:Request,context:Context) {
     else if(path==="earnings" && req.method==="GET") result=await driverEarnings(driverId,new URL(req.url));
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
-    else if(/^trips\/[^/]+\/commands$/.test(path) && req.method==="POST")result=await driverTripCommand(driverId,path.split("/")[1],await json());
+    else if(/^trips\/[^/]+\/commands$/.test(path) && req.method==="POST"){
+      const body=await json(),tripId=path.split("/")[1];result=await driverTripCommand(driverId,tripId,body);
+      if(body.action==="complete")after(()=>dispatchInstantPayouts(driverId,tripId));
+    }
     else if(path==="support" && req.method==="GET")result=await supportCases(driverId);
     else if(path==="support" && req.method==="POST")result=await createSupportCase(driverId,await json());
     else if(path.startsWith("documents/") && req.method==="POST" && path.split("/").length===2) {

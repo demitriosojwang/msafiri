@@ -3,6 +3,7 @@ import { audit } from "@/lib/audit";
 import * as daraja from "@/lib/daraja";
 import type {Prisma} from "@prisma/client";
 import {calculateSettlement} from "@/lib/payout-settlement";
+import {DriverError} from "@/lib/driver/errors";
 
 /**
  * The money engine.
@@ -484,17 +485,29 @@ export async function executePayout(payoutId: string): Promise<boolean> {
   return sendPayout(payoutId);
 }
 
+/** Queued records are the durable jobs; request completion is only a prompt to drain them. */
+export async function dispatchInstantPayouts(driverId:string,tripId:string) {
+  const cfg=await getConfig();if(cfg.payoutMode!=="instant_per_trip")return;
+  const records=await db.payoutRecord.findMany({where:{driverId,tripId,status:"queued"},take:100});
+  for(const record of records)try{await executePayout(record.id);}catch(error){
+    await db.payoutRecord.updateMany({where:{id:record.id,status:"queued"},data:{failureReason:error instanceof DriverError?error.message:"Transfer preparation requires operations review."}});
+  }
+}
+
 /** Uses durable, individually correlated transfer attempts; never treats provider acceptance as payment. */
 export async function runPayoutBatch(actor: {id:string;name:string;role:"passenger"|"admin"|"system"}) {
   const records=await db.payoutRecord.findMany({where:{status:"queued"},take:100,orderBy:{initiatedAt:"asc"}});
   const drivers=new Set(records.map(p=>p.driverId));
-  const counts={drivers:drivers.size,completed:0,failed:0,processing:0,ambiguous:0};
+  const counts={drivers:drivers.size,completed:0,failed:0,processing:0,ambiguous:0,deferred:0};
   for(const record of records) {
-    await executePayout(record.id);
+    try{await executePayout(record.id);}catch(error){
+      await db.payoutRecord.updateMany({where:{id:record.id,status:"queued"},data:{failureReason:error instanceof DriverError?error.message:"Transfer preparation requires operations review."}});
+    }
     const current=await db.payoutRecord.findUnique({where:{id:record.id}});
+    if(current?.status==="queued")counts.deferred++;
     if(current && current.status in counts && current.status!=="drivers") counts[current.status as "completed"|"failed"|"processing"|"ambiguous"]++;
   }
-  await db.platformConfig.update({where:{id:"main"},data:{lastPayoutRunAt:new Date()}});
+  if(counts.deferred===0)await db.platformConfig.update({where:{id:"main"},data:{lastPayoutRunAt:new Date()}});
   await audit({actorId:actor.id,actorName:actor.name,actorRole:actor.role,action:"money.payout_batch_run",entity:"system",entityId:"batch",metadata:counts});
   return counts;
 }
@@ -503,7 +516,7 @@ export async function runPayoutBatch(actor: {id:string;name:string;role:"passeng
 export async function isPayoutBatchDue(): Promise<{ due: boolean; mode: string; note: string }> {
   const cfg = await getConfig();
   if (cfg.payoutMode === "instant_per_trip")
-    return { due: false, mode: cfg.payoutMode, note: "Payouts fire instantly per trip completion." };
+    return { due:await db.payoutRecord.count({where:{status:"queued"}})>0, mode:cfg.payoutMode,note:"Completion prompts transfer dispatch; sweeps recover queued records. Provider confirmation is still required." };
   const now = new Date();
   if (cfg.payoutMode === "daily") {
     const last = cfg.lastPayoutRunAt;

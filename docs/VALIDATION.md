@@ -14,6 +14,9 @@
   Encrypted session expiry, saved-action account isolation and tamper rejection pass.
 - Full web production build passes with PostgreSQL generation, TypeScript and
   48 static-generation tasks. It uses the isolated test DB, not Vercel data.
+- Instant payout HTTP completion dispatch is verified in the local simulator;
+  replay still produces one transfer attempt. Queued records remain recoverable
+  when dispatch is interrupted or beneficiary/configuration review defers sending.
 - GitHub access to upstream is read-only; Vercel has no signed-in local session.
   Official `/api/v1/driver/status` returned 404 on 6 October 2026.
 

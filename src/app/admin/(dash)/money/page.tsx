@@ -245,12 +245,12 @@ function PayoutsTab() {
   async function runBatch() {
     setBusy(true);
     try {
-      const res = await api<{ drivers: number; completed: number; failed: number; processing:number; ambiguous:number }>("/api/admin/payouts", {
+      const res = await api<{ drivers: number; completed: number; failed: number; processing:number; ambiguous:number; deferred:number }>("/api/admin/payouts", {
         body: { action: "run_batch" },
       });
       toast({
         title: "Payout batch executed",
-        description: `${res.drivers} driver(s) · ${res.completed} confirmed · ${res.processing} processing · ${res.ambiguous} need reconciliation · ${res.failed} failed`,
+        description: `${res.drivers} driver(s) · ${res.completed} confirmed · ${res.processing} processing · ${res.ambiguous} need reconciliation · ${res.failed} failed · ${res.deferred} deferred`,
         variant: res.failed > 0 ? "destructive" : "default",
       });
       refresh();

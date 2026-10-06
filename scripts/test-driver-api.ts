@@ -71,6 +71,17 @@ try {
   assert.equal(await executePayout(payouts[0].id),true);assert.equal(await executePayout(payouts[0].id),true);
   assert.equal(await db.payoutAttempt.count({where:{payoutId:payouts[0].id}}),1);
   const statement=await api("/api/v1/driver/earnings");assert.equal(statement.lines[0].netMinor,95000);assert.equal(statement.lines[0].status,"completed");
+  await db.platformConfig.update({where:{id:"main"},data:{payoutMode:"instant_per_trip"}});
+  const autoTrip=await db.trip.create({data:{driverId,routeId:route.id,direction:"FROM_TERMINUS",departureAt:new Date(),capacity:10,status:"departed",driverProgress:{create:{driverId,phase:"in_progress"}}}});
+  await db.booking.create({data:{code:`TEST-${randomBytes(8).toString("hex")}`,passengerId:passenger.id,tripId:autoTrip.id,routeId:route.id,direction:"FROM_TERMINUS",seats:1,boardedSeats:1,fareAmount:1000,homeSurcharge:0,creditApplied:0,cashDue:1000,status:"boarded",ledgerEntry:{create:{tripId:autoTrip.id,totalAmount:1000,cashAmount:1000,creditApplied:0,homeSurchargeAmount:0,status:"held"}}}});
+  const autoCommand={action:"complete",expectedVersion:0,clientActionId:randomBytes(16).toString("hex")};
+  const autoPath=`/api/v1/driver/trips/${autoTrip.id}/commands`;
+  await api(autoPath,"POST",autoCommand);await api(autoPath,"POST",autoCommand);
+  const deadline=Date.now()+15000;
+  let automatic=await db.payoutRecord.findFirstOrThrow({where:{tripId:autoTrip.id}});
+  while(!automatic.settlementVerified && Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,100));automatic=await db.payoutRecord.findUniqueOrThrow({where:{id:automatic.id}});}
+  assert.equal(automatic.settlementVerified,true);assert.equal(await db.payoutAttempt.count({where:{payoutId:automatic.id}}),1);
+  await db.platformConfig.update({where:{id:"main"},data:{payoutMode:"weekly"}});
   // A partial party/no-show must preserve funds for review, never invent a driver entitlement.
   const partial=await db.trip.create({data:{driverId,routeId:route.id,direction:"FROM_TERMINUS",departureAt:new Date(Date.now()-60000),capacity:10,status:"locked"}});
   const partialBooking=await db.booking.create({data:{code:`TEST-${randomBytes(8).toString("hex")}`,passengerId:passenger.id,tripId:partial.id,routeId:route.id,direction:"FROM_TERMINUS",seats:2,fareAmount:1000,homeSurcharge:0,creditApplied:0,cashDue:1000,status:"confirmed"}});
