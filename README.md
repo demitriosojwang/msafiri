@@ -8,8 +8,9 @@ Official passenger URL: https://mireli-tau.vercel.app/
 
 Company contact: mirelisgr001@gmail.com
 
-**Development integration copy; not approved for deployment.** Production sign-in
-is intentionally unavailable until verified authentication replaces the prototype.
+**Development integration copy; not approved for deployment.** Passenger and
+administrator production sign-in remain disabled until verified authentication
+is configured. Driver SMS authentication is implemented; live setup is pending.
 No live database has been connected or migrated.
 
 The implemented driver API is `/api/v1/driver`: verified session access, private
