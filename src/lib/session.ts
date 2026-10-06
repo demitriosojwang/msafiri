@@ -1,15 +1,20 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * Lightweight signed-cookie sessions (HMAC-SHA256).
- * Prototype-grade: swap for JWT + httpOnly cookie infra in production,
- * but the boundary is the same — the cookie is signed server-side and
- * every API route re-verifies role + identity on every request.
+ * The cookie is signed server-side and verified for each request. These
+ * signatures do not replace verified identity, MFA or server-side revocation;
+ * those remain release requirements and production sign-in is disabled.
  */
 
-const SECRET =
-  process.env.SESSION_SECRET || "mireli-dev-secret-change-in-production";
+function sessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (secret && secret.length >= 32) return secret;
+  if (isLocalDemoEnabled()) return "mireli-local-preview-only-not-a-production-key";
+  throw new Error("SESSION_SECRET must contain at least 32 characters.");
+}
 
 const PASSENGER_COOKIE = "mireli_session";
 const ADMIN_COOKIE = "mireli_admin";
@@ -25,7 +30,7 @@ export interface Session {
 }
 
 function sign(payload: string): string {
-  return crypto.createHmac("sha256", SECRET).update(payload).digest("base64url");
+  return crypto.createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
 }
 
 export function encodeSession(s: Session): string {
@@ -34,9 +39,11 @@ export function encodeSession(s: Session): string {
 }
 
 export function decodeSession(token: string | undefined): Session | null {
-  if (!token) return null;
-  const [body, sig] = token.split(".");
-  if (!body || !sig) return null;
+  if (!token || token.length > 8192) return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [body, sig] = parts;
+  if (!body || !sig || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]{43}$/.test(sig)) return null;
   const expected = sign(body);
   // constant-time compare
   if (
@@ -47,7 +54,10 @@ export function decodeSession(token: string | undefined): Session | null {
   }
   try {
     const s = JSON.parse(Buffer.from(body, "base64url").toString()) as Session;
-    if (!s.exp || s.exp < Date.now()) return null;
+    if (!Number.isSafeInteger(s.exp) || s.exp <= Date.now() ||
+        !["passenger", "admin"].includes(s.role) ||
+        typeof s.id !== "string" || !s.id ||
+        typeof s.name !== "string" || typeof s.identifier !== "string") return null;
     return s;
   } catch {
     return null;
@@ -70,6 +80,7 @@ export function passengerCookieOptions() {
   return {
     name: PASSENGER_COOKIE,
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 days
@@ -80,6 +91,7 @@ export function adminCookieOptions() {
   return {
     name: ADMIN_COOKIE,
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
     maxAge: 60 * 60 * 12, // 12 hours

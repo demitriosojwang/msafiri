@@ -50,7 +50,7 @@ export async function GET() {
   const recentlyConfirmed = await attachBookings(recentRaw);
 
   // Daily bookkeeping: last 7 days commission earned vs payouts made
-  const payouts = await db.payoutRecord.findMany({ where: { status: "completed" } });
+  const payouts = await db.payoutRecord.findMany({ where: { status: "completed",settlementVerified:true } });
   const days: { date: string; commission: number; paidOut: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now);

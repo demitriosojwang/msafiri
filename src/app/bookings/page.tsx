@@ -81,7 +81,8 @@ interface TierQuote {
 export default function BookingsPage() {
   const { me, loading: meLoading } = useMe();
   const { toast } = useToast();
-  const [bookings, setBookings] = useState<BookingRow[] | null>(null);
+  const [loadedBookings, setBookings] = useState<BookingRow[] | null>(null);
+  const bookings = me?.session ? loadedBookings : meLoading ? null : [];
   const [payFor, setPayFor] = useState<BookingRow | null>(null);
   const [cancelFor, setCancelFor] = useState<BookingRow | null>(null);
   const [quote, setQuote] = useState<TierQuote | null>(null);
@@ -98,9 +99,13 @@ export default function BookingsPage() {
   }, []);
 
   useEffect(() => {
-    if (me?.session) load();
-    else if (!meLoading) setBookings([]);
-  }, [me, meLoading, load]);
+    if (!me?.session) return;
+    let active = true;
+    api<{ bookings: BookingRow[] }>("/api/bookings")
+      .then((res) => { if (active) setBookings(res.bookings); })
+      .catch(() => { if (active) setBookings([]); });
+    return () => { active = false; };
+  }, [me?.session?.id]);
 
   async function openCancel(b: BookingRow) {
     setCancelFor(b);

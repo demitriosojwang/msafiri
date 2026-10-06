@@ -1,0 +1,8 @@
+.env*
+.local/
+.tools/
+artifacts/
+upload/
+download/
+db/
+tool-results/

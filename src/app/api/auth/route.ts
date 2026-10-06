@@ -10,6 +10,7 @@ import {
 } from "@/lib/session";
 import { getConfig, issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * Unified auth — one entry point, roles detected by identity:
@@ -21,6 +22,9 @@ import { audit } from "@/lib/audit";
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const step = body.step as string;
+  if (step !== "logout" && !isLocalDemoEnabled()) {
+    return NextResponse.json({ error: "Verified sign-in is not configured. Contact mirelisgr001@gmail.com." }, { status: 503 });
+  }
   const cfg = await getConfig();
   const adminEmails = JSON.parse(cfg.adminEmails) as string[];
 

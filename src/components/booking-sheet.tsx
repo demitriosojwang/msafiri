@@ -125,41 +125,38 @@ function blankToDefault(d: PassengerDetails): PassengerDetails {
   return { ...d, nationality: d.nationality || DEFAULT_NATIONALITY };
 }
 
-export function BookingSheet({
+export function BookingSheet(props: Omit<Parameters<typeof BookingSheetContent>[0], "identity">) {
+  const identity = useMe();
+  return props.open && props.draft && !identity.loading
+    ? <BookingSheetContent key={props.draft.trip.id} {...props} identity={identity} /> : null;
+}
+
+function BookingSheetContent({
   open,
   onClose,
   draft,
   onBooked,
+  identity,
 }: {
   open: boolean;
   onClose: () => void;
   draft: BookingDraft | null;
   onBooked: () => void;
+  identity: ReturnType<typeof useMe>;
 }) {
-  const { me, refresh } = useMe();
+  const { me, refresh } = identity;
   const creditBalance = me?.creditBalance || 0;
-  const [homeAddress, setHomeAddress] = useState("");
-  const [useCredit, setUseCredit] = useState(false);
+  const [homeAddress, setHomeAddress] = useState(draft?.homeAddress || "");
+  const [useCredit, setUseCredit] = useState(draft?.useCredit || false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateResponse["booking"] | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const [details, setDetails] = useState<PassengerDetails>({ ...EMPTY_DETAILS });
-
-  // Prefill: signed-in accounts prefill from their profile, guests from the
-  // last details typed on this device.
-  useEffect(() => {
-    if (!open || !draft) return;
-    setHomeAddress(draft.homeAddress || "");
-    setUseCredit(draft.useCredit);
-    setError(null);
-    setCreated(null);
-    setPayOpen(false);
-    setAuthOpen(false);
+  const [details, setDetails] = useState<PassengerDetails>(() => {
     const p = me?.passenger;
     if (p && !p.isGuest) {
-      setDetails({
+      return {
         fullName: p.name || "",
         idType: p.idType === "passport" ? "passport" : "id",
         idNumber: p.idNumber || "",
@@ -167,12 +164,10 @@ export function BookingSheet({
         gender: p.gender || "",
         email: p.email || "",
         phone: p.phone || "",
-      });
-    } else {
-      setDetails(blankToDefault(loadGuestDetails()));
+      };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, draft]);
+    return blankToDefault(loadGuestDetails());
+  });
 
   const trip = draft?.trip;
   const stage = useMemo(() => trip?.stages.find((s) => s.id === draft?.stageId), [trip, draft?.stageId]);

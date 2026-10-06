@@ -1,17 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 export const metadata: Metadata = {
   title: "Mi-Reli — Reliable rides from the SGR terminus",
@@ -35,8 +25,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
+        className="font-sans antialiased bg-background text-foreground min-h-screen flex flex-col"
       >
+        {isLocalDemoEnabled() && <div role="status" className="bg-amber-100 px-4 py-2 text-center text-xs font-medium text-amber-950">LOCAL PREVIEW · Sample bookings and simulated payments · No transport service is booked</div>}
         {children}
         <Toaster />
       </body>

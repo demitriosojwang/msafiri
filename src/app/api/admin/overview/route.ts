@@ -38,9 +38,9 @@ export async function GET() {
   // Today's money
   const todayEntries = entries.filter((e) => e.collectedAt && e.collectedAt >= todayStart);
   const payouts = await db.payoutRecord.findMany();
-  const todayPayouts = payouts.filter((p) => p.completedAt && p.completedAt >= todayStart);
+  const todayPayouts = payouts.filter((p) => p.status==="completed" && p.settlementVerified && p.completedAt && p.completedAt >= todayStart);
   const todayCommission = payouts
-    .filter((p) => p.completedAt && p.completedAt >= todayStart)
+    .filter((p) => p.status==="completed" && p.settlementVerified && p.completedAt && p.completedAt >= todayStart)
     .reduce((s, p) => s + p.commissionAmount, 0);
 
   // Alerts / exceptions

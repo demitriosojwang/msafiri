@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -29,7 +29,11 @@ import { ArrowRight, Loader2, ShieldCheck, UserRoundCheck } from "lucide-react";
  * the server matches them (phone + name + ID + email) and upgrades the
  * guest into an account, carrying over bookings and travel credit.
  */
-export function AuthSheet({
+export function AuthSheet(props: Parameters<typeof AuthSheetContent>[0]) {
+  return props.open ? <AuthSheetContent {...props} /> : null;
+}
+
+function AuthSheetContent({
   open,
   onClose,
   initialDetails,
@@ -41,19 +45,10 @@ export function AuthSheet({
   onAuthed: () => void;
 }) {
   const [step, setStep] = useState<"details" | "verify">("details");
-  const [details, setDetails] = useState<PassengerDetails>(initialDetails);
+  const [details, setDetails] = useState<PassengerDetails>(() => ({ ...initialDetails, nationality: initialDetails.nationality || DEFAULT_NATIONALITY }));
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setStep("details");
-      setCode("");
-      setError(null);
-      setDetails({ ...initialDetails, nationality: initialDetails.nationality || DEFAULT_NATIONALITY });
-    }
-  }, [open, initialDetails]);
 
   function set<K extends keyof PassengerDetails>(key: K, value: PassengerDetails[K]) {
     setDetails((d) => ({ ...d, [key]: value }));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAdminData } from "@/components/admin/use-admin-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,12 +46,9 @@ const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frid
 export default function AdminConfig() {
   const { toast } = useToast();
   const { data, refresh } = useAdminData<ConfigData>("/api/admin/config");
-  const [form, setForm] = useState<ConfigData["config"] | null>(null);
+  const [draft, setForm] = useState<ConfigData["config"] | null>(null);
+  const form = draft ?? data?.config;
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (data?.config) setForm(data.config);
-  }, [data]);
 
   if (!form) return <div className="h-64 animate-pulse rounded-lg bg-muted" />;
 
@@ -60,7 +57,8 @@ export default function AdminConfig() {
     try {
       await api("/api/admin/config", { method: "PUT", body: form });
       toast({ title: "Config saved", description: "Changes apply to every new booking, cancellation and payout batch immediately." });
-      refresh();
+      await refresh();
+      setForm(null);
     } catch (e) {
       toast({ title: "Rejected", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {

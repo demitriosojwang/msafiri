@@ -2,18 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { runOperationalTick, CAB_LEAD_MINUTES } from "@/lib/engine";
 import { getConfig } from "@/lib/money";
+import { nairobiDayRange } from "@/lib/nairobi-time";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
-  await runOperationalTick();
   const { searchParams } = new URL(req.url);
   const date = searchParams.get("date"); // YYYY-MM-DD
   const direction = searchParams.get("direction") || "FROM_TERMINUS";
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
-  const dayStart = new Date(`${date}T00:00:00`);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+  let dayStart: Date;
+  let dayEnd: Date;
+  try { ({ start: dayStart, end: dayEnd } = nairobiDayRange(date)); }
+  catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
+  await runOperationalTick();
   const now = new Date();
   const cfg = await getConfig();
 

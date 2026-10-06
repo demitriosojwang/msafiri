@@ -1,6 +1,9 @@
 import { db } from "@/lib/db";
+import {evaluateDriverApplication} from "@/lib/driver/onboarding";
 import { getConfig, onTripCompleted, runReconciliationSweep, isPayoutBatchDue, runPayoutBatch } from "@/lib/money";
 import { audit } from "@/lib/audit";
+import { nairobiDate, nairobiDayRange, nairobiEventAt } from "@/lib/nairobi-time";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * The ops engine — everything here runs automatically so the admin's role
@@ -31,17 +34,8 @@ export const CAB_LEAD_MINUTES = 120;
  *  leaves and the booking lands in the no-show tier. */
 export const STAGE_GRACE_MINUTES = 15;
 
-function parseHHMM(hhmm: string): { h: number; m: number } {
-  const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
-  return { h: h || 0, m: m || 0 };
-}
-
 function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
-  const { h, m } = parseHHMM(hhmm);
-  const d = new Date(base);
-  d.setDate(d.getDate() + dayOffset);
-  d.setHours(h, m, 0, 0);
-  return d;
+  return nairobiEventAt(base, dayOffset, hhmm);
 }
 
 /** Creates scheduled trips for the next `tripHorizonDays`, anchored to the
@@ -51,7 +45,8 @@ function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
 export async function ensureTrips(): Promise<number> {
   const cfg = await getConfig();
   const routes = await db.route.findMany({ where: { active: true } });
-  const drivers = await db.driver.findMany({ where: { status: "active" }, orderBy: { createdAt: "asc" } });
+  const candidates = await db.driver.findMany({ where: { status: "active" }, orderBy: { createdAt: "asc" },include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}} });
+  const drivers=candidates.filter(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
   if (!drivers.length || !routes.length) return 0;
 
   // Departure-anchored (MBA_TO_NBO) trains first, so outbound cabs exist
@@ -165,10 +160,7 @@ export async function allocateBooking(params: {
   const cfg = await getConfig();
   await ensureTrips();
 
-  const dayStart = new Date(params.travelDate);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  const { start: dayStart, end: dayEnd } = nairobiDayRange(nairobiDate(params.travelDate));
 
   const now = new Date();
   const minDeparture = new Date(now.getTime() + cfg.bookingWindowMinutes * 60 * 1000);
@@ -224,10 +216,12 @@ export async function allocateBooking(params: {
     select: { driverId: true },
   });
   const busyIds = new Set(busy.map((b) => b.driverId));
-  const freeDriver = await db.driver.findFirst({
-    where: { status: "active", id: { notIn: [...busyIds].filter(Boolean) as string[] } },
-    orderBy: { createdAt: "asc" },
+  const freeCandidates=await db.driver.findMany({
+    where:{status:"active",id:{notIn:[...busyIds].filter(Boolean) as string[]}},
+    orderBy:{createdAt:"asc"},
+    include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}}
   });
+  const freeDriver=freeCandidates.find(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
   if (freeDriver && params.seats <= freeDriver.capacity) {
     // Depart 2 hours out on the travel day
     const dep = new Date(Math.max(now.getTime() + 2 * 60 * 60 * 1000, dayStart.getTime()));
@@ -355,8 +349,10 @@ export async function runOperationalTick(): Promise<{
 }> {
   const tripsCreated = await ensureTrips();
   const locked = await lockTrips();
-  const departed = await departTrips();
-  const completed = await completeTrips();
+  // Elapsed time is not evidence that a driver departed or delivered a ride.
+  // Live transitions require the future authorized driver command API.
+  const departed = isLocalDemoEnabled() ? await departTrips() : 0;
+  const completed = isLocalDemoEnabled() ? await completeTrips() : 0;
   return { tripsCreated, locked, departed, completed };
 }
 

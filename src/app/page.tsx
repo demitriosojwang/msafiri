@@ -90,14 +90,17 @@ export default function Home() {
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [isRefreshing, setLoading] = useState(false);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const queryKey = `${direction}|${date}`;
+  const loading = isRefreshing || loadedQuery !== queryKey;
 
   // selection state (original store equivalents)
   const [trainKey, setTrainKey] = useState<string | null>(null);
   const [pointId, setPointId] = useState<string | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
-  const [seats, setSeats] = useState(1);
+  const [requestedSeats, setSeats] = useState(1);
 
   const [draft, setDraft] = useState<BookingDraft | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -114,6 +117,7 @@ export default function Home() {
       setTrips([]);
     } finally {
       setLoading(false);
+      setLoadedQuery(`${dir}|${d}`);
     }
   }, []);
 
@@ -136,13 +140,23 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (isAuthed) loadMyBookings();
-  }, [isAuthed, loadMyBookings]);
+    if (!isAuthed) return;
+    let active = true;
+    api<{ bookings: BookingRow[] }>("/api/bookings")
+      .then((res) => { if (active) setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status))); })
+      .catch(() => { if (active) setMyBookings([]); });
+    return () => { active = false; };
+  }, [isAuthed]);
 
   useEffect(() => {
     if (showSplash || !isAuthed) return;
-    loadTrips(direction, date);
-  }, [showSplash, isAuthed, direction, date, loadTrips]);
+    let active = true;
+    api<{ trips: BookableTrip[] }>(`/api/trips?date=${date}&direction=${direction}`)
+      .then((res) => { if (active) setTrips(res.trips); })
+      .catch(() => { if (active) setTrips([]); })
+      .finally(() => { if (active) setLoadedQuery(queryKey); });
+    return () => { active = false; };
+  }, [showSplash, isAuthed, direction, date, queryKey]);
 
   function openBooking(trip: BookableTrip) {
     const fallbackStage =
@@ -199,13 +213,13 @@ export default function Home() {
       .filter((g) => g.points.length > 0);
   }, [routes]);
 
-  const selectedPoint = useMemo(() => {
+  const selectedPoint = (() => {
     for (const g of pointGroups) {
       const p = g.points.find((s) => s.id === pointId);
       if (p) return { point: p, route: g.route, coast: g.coast };
     }
     return null;
-  }, [pointGroups, pointId]);
+  })();
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
@@ -222,13 +236,11 @@ export default function Home() {
     return Math.max(1, Math.min(14, maxLeft || 14));
   }, [loading, visibleTrips]);
 
-  useEffect(() => {
-    if (!loading && seats > seatCap) setSeats(seatCap);
-  }, [loading, seatCap, seats]);
+  const seats = Math.min(requestedSeats, seatCap);
 
   // Live fare preview
   const previewStage = selectedPoint?.point;
-  const farePreview = useMemo(() => {
+  const farePreview = (() => {
     const base = charter
       ? selectedPoint?.route.charterPrice ?? 0
       : (previewStage?.fare || 0) * seats;
@@ -236,7 +248,7 @@ export default function Home() {
       ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
       : 0;
     return { base, surcharge, total: base + surcharge };
-  }, [charter, previewStage, selectedPoint, seats, homePickup]);
+  })();
 
   /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
 

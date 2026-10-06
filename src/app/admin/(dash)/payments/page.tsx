@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAdminData } from "@/components/admin/use-admin-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,23 +72,18 @@ const emptyForm = {
 export default function AdminPayments() {
   const { toast } = useToast();
   const { data, refresh } = useAdminData<PaymentsData>("/api/admin/payments");
-  const [form, setForm] = useState(emptyForm);
+  const [draft, setForm] = useState<typeof emptyForm | null>(null);
+  const form = draft ?? {
+    ...emptyForm,
+    environment: data?.saved.environment || "sandbox",
+    callbackBaseUrl: data?.saved.callbackBaseUrl || "",
+    shortcode: data?.saved.shortcode || "",
+    b2cShortcode: data?.saved.b2cShortcode || "",
+    initiatorName: data?.saved.initiatorName || "",
+  };
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  useEffect(() => {
-    if (data?.saved) {
-      setForm({
-        ...emptyForm,
-        environment: data.saved.environment || "sandbox",
-        callbackBaseUrl: data.saved.callbackBaseUrl || "",
-        shortcode: data.saved.shortcode || "",
-        b2cShortcode: data.saved.b2cShortcode || "",
-        initiatorName: data.saved.initiatorName || "",
-      });
-    }
-  }, [data]);
 
   if (!data) return <div className="h-64 animate-pulse rounded-lg bg-muted" />;
 
@@ -101,7 +96,8 @@ export default function AdminPayments() {
       const res = await api<{ message: string }>("/api/admin/payments", { method: "PUT", body: form });
       toast({ title: "Payments updated", description: res.message });
       setTestResult(null);
-      refresh();
+      await refresh();
+      setForm(null);
     } catch (e) {
       toast({ title: "Rejected", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {
@@ -132,7 +128,8 @@ export default function AdminPayments() {
         body: { action: "clear_all" },
       });
       toast({ title: "Credentials cleared", description: res.message });
-      refresh();
+      await refresh();
+      setForm(null);
     } finally {
       setBusy(false);
     }

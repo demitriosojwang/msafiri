@@ -22,8 +22,12 @@ export function useAdminData<T>(url: string) {
   }, [url]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let active = true;
+    api<T>(url).then((res) => { if (active) { setData(res); setError(null); } })
+      .catch((e) => { if (active) setError(e instanceof Error ? e.message : "Request failed"); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [url]);
 
   return { data, loading, error, refresh };
 }

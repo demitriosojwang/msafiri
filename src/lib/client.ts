@@ -69,13 +69,20 @@ export async function api<T = unknown>(
 }
 
 /** Passenger session hook — refreshes on demand. */
+let pendingIdentity: Promise<Me> | null = null;
+function fetchIdentity() {
+  // Several mounted screens need the same guest cookie. Deduplicate their
+  // first request so one browser visit does not create multiple guest records.
+  pendingIdentity ??= api<Me>("/api/me").finally(() => { pendingIdentity = null; });
+  return pendingIdentity;
+}
 export function useMe() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const data = await api<Me>("/api/me");
+      const data = await fetchIdentity();
       setMe(data);
     } catch {
       setMe({ session: null });
@@ -85,8 +92,12 @@ export function useMe() {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let active = true;
+    fetchIdentity().then((data) => { if (active) setMe(data); })
+      .catch(() => { if (active) setMe({ session: null }); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   return { me, loading, refresh };
 }

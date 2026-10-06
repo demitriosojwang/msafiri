@@ -34,6 +34,11 @@ function receipt() {
 }
 
 async function main() {
+  throw new Error("Legacy destructive seed is disabled. Use npm run preview:local for an isolated synthetic database.");
+}
+
+// Preserved for migration review only. Never invoked by the application or build.
+async function legacySeedReference() {
   const now = new Date();
   console.log("Seeding Mi-Reli…");
 

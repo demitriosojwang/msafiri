@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import * as daraja from "@/lib/daraja";
+import type {Prisma} from "@prisma/client";
+import {calculateSettlement} from "@/lib/payout-settlement";
 
 /**
  * The money engine.
@@ -444,207 +446,57 @@ async function passengerPhone(passengerId: string): Promise<string> {
 /** Fires when a trip is COMPLETED (service delivered) — never at booking,
  *  never at lock. Creates one payout record per booking manifest line. */
 export async function onTripCompleted(tripId: string) {
-  const cfg = await getConfig();
-  const trip = await db.trip.findUnique({
-    where: { id: tripId },
-    include: { bookings: { include: { ledgerEntry: true, passenger: true } } },
-  });
-  if (!trip || trip.status === "completed") return;
-  if (!trip.driverId) return; // nothing owed if no driver was ever assigned
+  const cfg=await getConfig();
+  const payoutIds=await db.$transaction(tx=>settleCompletedTrip(tx,tripId,cfg.commissionRate));
+  if(cfg.payoutMode==="instant_per_trip")for(const id of payoutIds)await executePayout(id);
+}
 
-  const now = new Date();
-
-  for (const b of trip.bookings) {
-    const entry = b.ledgerEntry;
-    if (!entry) continue;
-
-    if (b.status === "boarded" || b.status === "confirmed") {
-      // Delivered passenger (confirmed-but-not-checked-in would have been
-      // handled as no-show at departure; treat late check-ins as delivered).
-      await db.booking.update({
-        where: { id: b.id },
-        data: { status: "completed" },
-      });
-      if (entry.status === "held") {
-        await db.ledgerEntry.update({
-          where: { id: entry.id },
-          data: { status: "driver_payable", statusChangedAt: now },
-        });
-
-        const gross = entry.totalAmount;
-        const homeSurcharge = entry.homeSurchargeAmount;
-        // Home surcharge passes to the driver in full — it compensates their
-        // detour and is NOT part of the commission base.
-        const commissionBase = Math.max(gross - homeSurcharge, 0);
-        const commission = Math.round(commissionBase * cfg.commissionRate);
-        const net = gross - commission;
-
-        const payout = await db.payoutRecord.create({
-          data: {
-            driverId: trip.driverId,
-            tripId: trip.id,
-            grossFareTotal: gross,
-            commissionAmount: commission,
-            homeSurchargeAmount: homeSurcharge,
-            netPayoutAmount: net,
-            method: "b2c",
-            status: "queued",
-          },
-        });
-
-        // instant_per_trip mode fires the B2C immediately
-        if (cfg.payoutMode === "instant_per_trip") {
-          await executePayout(payout.id);
-        }
-      }
-    } else if (b.status === "confirmed") {
-      // defensive: never checked in → no-show resolution
-      await executeCancellation({
-        bookingId: b.id,
-        actor: { id: "system", name: "Ops Engine", role: "system" },
-        trigger: "no_show_resolution",
-      });
+/** Also called inside a driver command transaction, so its receipt and money state commit together. */
+export async function settleCompletedTrip(tx:Prisma.TransactionClient,tripId:string,commissionRate:number) {
+    const trip=await tx.trip.findUnique({where:{id:tripId},include:{bookings:{include:{ledgerEntry:true}}}});
+    if(!trip || trip.status!=="departed" || !trip.driverId)return [];
+    if(trip.bookings.some(b=>b.status==="confirmed"))throw new Error("Resolve every passenger boarding outcome before completion.");
+    const claimed=await tx.trip.updateMany({where:{id:tripId,status:"departed"},data:{status:"completed",completedAt:new Date()}});
+    if(claimed.count!==1)return [];
+    const ids:string[]=[];
+    for(const booking of trip.bookings) {
+      const entry=booking.ledgerEntry;
+      if(booking.status!=="boarded" || !entry || entry.status!=="held")continue;
+      const split=calculateSettlement(entry.totalAmount,entry.homeSurchargeAmount,Math.round(commissionRate*10000));
+      // A partially boarded party needs an explicit operations decision about its fare.
+      // Preserve the held funds and show the unsettled statement without guessing a refund policy.
+      const needsReview=booking.noShowSeats>0;
+      const payout=await tx.payoutRecord.create({data:{driverId:trip.driverId,tripId,ledgerEntryId:entry.id,
+        grossFareTotal:split.gross,commissionAmount:split.commission,homeSurchargeAmount:split.surcharge,netPayoutAmount:split.net,status:needsReview?"needs_review":"queued",
+        failureReason:needsReview?"Partial party no-show: settlement requires operations review.":null}});
+      if(!needsReview)await tx.ledgerEntry.update({where:{id:entry.id},data:{status:"driver_payable",statusChangedAt:new Date()}});
+      await tx.booking.update({where:{id:booking.id},data:{status:"completed"}});
+      if(!needsReview)ids.push(payout.id);
     }
-    // cancelled / no_show bookings: ledger already terminal
-  }
-
-  await db.trip.update({
-    where: { id: tripId },
-    data: { status: "completed", completedAt: now },
-  });
-  await audit({
-    actorId: "system",
-    actorName: "Ops Engine",
-    actorRole: "system",
-    action: "trip.completed",
-    entity: "trip",
-    entityId: tripId,
-    metadata: { payoutsCreated: true },
-  });
+    await tx.auditLog.create({data:{actorId:"system",actorRole:"system",actorName:"Settlement service",action:"trip.completed",entity:"trip",entityId:tripId,metadata:JSON.stringify({payoutsCreated:ids.length})}});
+    return ids;
 }
 
 /** Executes one queued payout via B2C. Failure flags for admin review —
  *  never silently retried against a possibly bad number. */
 export async function executePayout(payoutId: string): Promise<boolean> {
-  const payout = await db.payoutRecord.findUnique({
-    where: { id: payoutId },
-    include: { driver: true },
-  });
-  if (!payout || payout.status === "completed") return payout?.status === "completed";
-  const result = await daraja.b2c({
-    receiverPhone: payout.driver.mpesaNumber,
-    amount: payout.netPayoutAmount,
-    remarks: `Mi-Reli payout ${payout.id}`,
-  });
-  const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-  await db.payoutRecord.update({
-    where: { id: payout.id },
-    data: {
-      status: ok ? "completed" : "failed",
-      mpesaResultCode: result.resultCode,
-      failureReason: ok ? null : result.resultDesc,
-      completedAt: ok ? new Date() : null,
-    },
-  });
-  if (ok) {
-    // The platform has now taken its commission and paid the driver —
-    // the ledger line moves to its terminal bucket.
-    await db.ledgerEntry.updateMany({
-      where: { tripId: payout.tripId, status: "driver_payable" },
-      data: { status: "commission_taken", statusChangedAt: new Date() },
-    });
-  } else {
-    await audit({
-      actorId: "system",
-      actorName: "Ops Engine",
-      actorRole: "system",
-      action: "money.payout_failed",
-      entity: "payout",
-      entityId: payout.id,
-      metadata: { driver: payout.driver.name, reason: result.resultDesc },
-    });
-  }
-  return ok;
+  const {sendPayout}=await import("@/lib/payout-settlement");
+  return sendPayout(payoutId);
 }
 
-/** Scheduled payout run — weekly by default (mirrors Uber/Bolt in Kenya).
- *  Sums every queued payout per driver into ONE B2C transfer. */
-export async function runPayoutBatch(
-  actor: { id: string; name: string; role: "passenger" | "admin" | "system" }
-): Promise<{ drivers: number; completed: number; failed: number }> {
-  const queued = await db.payoutRecord.findMany({
-    where: { status: "queued" },
-    include: { driver: true },
-  });
-  const byDriver = new Map<string, typeof queued>();
-  for (const p of queued) {
-    const list = byDriver.get(p.driverId) || [];
-    list.push(p);
-    byDriver.set(p.driverId, list);
+/** Uses durable, individually correlated transfer attempts; never treats provider acceptance as payment. */
+export async function runPayoutBatch(actor: {id:string;name:string;role:"passenger"|"admin"|"system"}) {
+  const records=await db.payoutRecord.findMany({where:{status:"queued"},take:100,orderBy:{initiatedAt:"asc"}});
+  const drivers=new Set(records.map(p=>p.driverId));
+  const counts={drivers:drivers.size,completed:0,failed:0,processing:0,ambiguous:0};
+  for(const record of records) {
+    await executePayout(record.id);
+    const current=await db.payoutRecord.findUnique({where:{id:record.id}});
+    if(current && current.status in counts && current.status!=="drivers") counts[current.status as "completed"|"failed"|"processing"|"ambiguous"]++;
   }
-
-  const batchId = `batch-${Date.now()}`;
-  let completed = 0;
-  let failed = 0;
-
-  for (const [, records] of byDriver) {
-    // Execute one representative record per driver with the SUM, but keep
-    // per-trip records intact — mark each included record by batch result.
-    const total = records.reduce((s, r) => s + r.netPayoutAmount, 0);
-    const result = await daraja.b2c({
-      receiverPhone: records[0].driver.mpesaNumber,
-      amount: total,
-      remarks: `Mi-Reli payout batch ${batchId}`,
-    });
-    const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-    for (const r of records) {
-      await db.payoutRecord.update({
-        where: { id: r.id },
-        data: {
-          status: ok ? "completed" : "failed",
-          mpesaResultCode: result.resultCode,
-          failureReason: ok ? null : result.resultDesc,
-          batchId,
-          completedAt: ok ? new Date() : null,
-        },
-      });
-      if (ok) {
-        await db.ledgerEntry.updateMany({
-          where: { tripId: r.tripId, status: "driver_payable" },
-          data: { status: "commission_taken", statusChangedAt: new Date() },
-        });
-        completed++;
-      } else {
-        failed++;
-      }
-    }
-    if (!ok) {
-      await audit({
-        actorId: actor.id,
-        actorName: actor.name,
-        actorRole: actor.role,
-        action: "money.payout_batch_failure",
-        entity: "driver",
-        entityId: records[0].driverId,
-        metadata: { driver: records[0].driver.name, total, reason: result.resultDesc },
-      });
-    }
-  }
-
-  await db.platformConfig.update({
-    where: { id: "main" },
-    data: { lastPayoutRunAt: new Date() },
-  });
-  await audit({
-    actorId: actor.id,
-    actorName: actor.name,
-    actorRole: actor.role,
-    action: "money.payout_batch_run",
-    entity: "system",
-    entityId: batchId,
-    metadata: { drivers: byDriver.size, completed, failed },
-  });
-  return { drivers: byDriver.size, completed, failed };
+  await db.platformConfig.update({where:{id:"main"},data:{lastPayoutRunAt:new Date()}});
+  await audit({actorId:actor.id,actorName:actor.name,actorRole:actor.role,action:"money.payout_batch_run",entity:"system",entityId:"batch",metadata:counts});
+  return counts;
 }
 
 /** Is the scheduled payout batch due? (weekly default, config-driven) */

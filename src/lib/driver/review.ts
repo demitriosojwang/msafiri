@@ -1,0 +1,48 @@
+import {db} from "@/lib/db";
+import {getAdminSession} from "@/lib/session";
+import {isLocalDemoEnabled} from "@/lib/runtime-mode";
+import {applicableRequirements,POLICY_VERSION} from "./catalogue";
+import {DriverError,integer,text} from "./errors";
+
+export async function requireReviewer(req:Request,role:"compliance"|"finance"="compliance") {
+  const session=await getAdminSession();
+  if(!session)throw new DriverError(401,"UNAUTHENTICATED","Sign in to compliance.");
+  const allowed=(process.env[role==="finance"?"DRIVER_FINANCE_REVIEWERS":"DRIVER_COMPLIANCE_REVIEWERS"]||"").split(",").map(s=>s.trim().toLowerCase());
+  if(!isLocalDemoEnabled() && !allowed.includes(session.identifier.toLowerCase()))throw new DriverError(403,"REVIEWER_REQUIRED","Compliance reviewer access is required.");
+  if(req.method!=="GET") {
+    const expected=isLocalDemoEnabled()?`http://${req.headers.get("host")}`:process.env.MIRELI_PUBLIC_ORIGIN;
+    if(!expected || (!isLocalDemoEnabled() && !expected.startsWith("https://")))throw new DriverError(503,"ORIGIN_NOT_CONFIGURED","Compliance origin is not configured.");
+    if(req.headers.get("origin")!==expected)throw new DriverError(403,"ORIGIN_REJECTED","Request origin is invalid.");
+  }
+  return session;
+}
+export async function reviewApplication(id:string,body:Record<string,unknown>,actor:{id:string;name:string}) {
+  const version=integer(body.expectedVersion,"Version"),action=text(body.action,"Action",3,30);
+  const reason=typeof body.reason==="string"?body.reason.trim().slice(0,500):"";
+  if(["reject_document","needs_changes","suspend"].includes(action) && reason.length<5)throw new DriverError(400,"REASON_REQUIRED","Give an actionable reason.");
+  await db.$transaction(async tx=>{
+    const app=await tx.driverApplication.findUnique({where:{id},include:{documents:{where:{state:{not:"replaced"}}}}});
+    if(!app)throw new DriverError(404,"NOT_FOUND","Application not found.");
+    if(app.version!==version)throw new DriverError(409,"STALE_APPLICATION","Another reviewer changed this application. Refresh.");
+    const now=new Date();let status=app.status;
+    if(action==="approve_document" || action==="reject_document") {
+      if(app.status!=="submitted")throw new DriverError(409,"NOT_SUBMITTED","Documents can be reviewed after submission.");
+      const document=app.documents.find(d=>d.id===body.documentId);
+      if(!document)throw new DriverError(404,"NOT_FOUND","Current document not found.");
+      if(action==="approve_document" && (!(["clean",...(isLocalDemoEnabled()?["clean_demo"]:[])].includes(document.scanState)) || (document.expiresAt && document.expiresAt<=now)))throw new DriverError(409,"DOCUMENT_NOT_READY","Document must pass scanning and be unexpired.");
+      await tx.driverDocument.update({where:{id:document.id},data:{state:action==="approve_document"?"approved":"rejected",reviewedBy:actor.id,reviewedAt:now,reviewReason:reason||null}});
+    } else if(action==="approve") {
+      if(app.status!=="submitted")throw new DriverError(409,"NOT_SUBMITTED","Application must be submitted.");
+      if(app.policyVersion!==POLICY_VERSION)throw new DriverError(409,"POLICY_UPDATED","The driver must acknowledge the current policy.");
+      const missing=applicableRequirements(app.ownsVehicle).filter(r=>r.required && !app.documents.some(d=>d.type===r.id && d.state==="approved" && (!d.expiresAt || d.expiresAt>now) && (d.scanState==="clean" || (isLocalDemoEnabled() && d.scanState==="clean_demo"))));
+      if(missing.length)throw new DriverError(409,"OUTSTANDING_DOCUMENTS","Approve all required current documents first.");
+      status="approved";await tx.driver.update({where:{id:app.driverId},data:{status:"active"}});
+    } else if(action==="needs_changes") {status="changes_requested";await tx.driver.update({where:{id:app.driverId},data:{status:"applicant"}});}
+    else if(action==="suspend") {status="suspended";await tx.driver.update({where:{id:app.driverId},data:{status:"suspended"}});}
+    else throw new DriverError(400,"INVALID_ACTION","Review action is invalid.");
+    const updated=await tx.driverApplication.updateMany({where:{id,version},data:{version:{increment:1},status,reviewedBy:actor.id,reviewedAt:now,reviewReason:reason||app.reviewReason}});
+    if(updated.count!==1)throw new DriverError(409,"STALE_APPLICATION","Refresh before reviewing.");
+    await tx.auditLog.create({data:{actorId:actor.id,actorName:actor.name,actorRole:"compliance",action:`driver.review.${action}`,entity:"driver_application",entityId:id,metadata:JSON.stringify({documentId:body.documentId??null,reason,version})}});
+  });
+  return {ok:true};
+}

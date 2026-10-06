@@ -24,8 +24,10 @@ export async function GET() {
     batch,
     totals: {
       queued: payouts.filter((p) => p.status === "queued").reduce((s, p) => s + p.netPayoutAmount, 0),
-      paid: payouts.filter((p) => p.status === "completed").reduce((s, p) => s + p.netPayoutAmount, 0),
-      commission: payouts.filter((p) => p.status === "completed").reduce((s, p) => s + p.commissionAmount, 0),
+      paid: payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.netPayoutAmount, 0),
+      commission: payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.commissionAmount, 0),
+      processing:payouts.filter(p=>p.status==="processing").reduce((s,p)=>s+p.netPayoutAmount,0),
+      ambiguous:payouts.filter(p=>p.status==="ambiguous").reduce((s,p)=>s+p.netPayoutAmount,0),
       failed: payouts.filter((p) => p.status === "failed").reduce((s, p) => s + p.netPayoutAmount, 0),
     },
     payouts: payouts.map((p) => ({
@@ -39,7 +41,7 @@ export async function GET() {
       homeSurcharge: p.homeSurchargeAmount,
       net: p.netPayoutAmount,
       method: p.method,
-      status: p.status,
+      status: p.status === "completed" && !p.settlementVerified ? "needs_review" : p.status,
       result: p.mpesaResultCode,
       failureReason: p.failureReason,
       batchId: p.batchId,

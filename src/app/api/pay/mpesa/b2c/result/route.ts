@@ -6,8 +6,8 @@ import { audit } from "@/lib/audit";
  *
  * B2C (payouts, cash refunds) and Reversal are asynchronous: the initial
  * request is merely ACCEPTED; the authoritative outcome arrives here. The
- * money engine already treats acceptance as "completed" for payouts and flags
- * failures for review, so this webhook's job is oversight: every result is
+ * driver money engine correlates per-attempt callbacks at payout-result/{capability}.
+ * This older webhook cannot settle funds; its job is oversight: every result is
  * written to the audit log where Admin → Audit surfaces it. If a transfer
  * ultimately failed, the admin retries it from the Money & Ledger page —
  * nothing is ever silently retried.

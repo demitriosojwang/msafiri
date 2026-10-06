@@ -97,6 +97,7 @@ export function SiteFooter() {
     <footer className="mt-auto border-t bg-background/95 backdrop-blur">
       <div className="mx-auto max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground">
         Mi-Reli · Mombasa Terminus · every shilling tracked in the platform ledger
+        <div className="mt-1"><a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a></div>
       </div>
     </footer>
   );

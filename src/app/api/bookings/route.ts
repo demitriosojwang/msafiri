@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
 import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
+import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -13,7 +14,7 @@ const GUEST_COUNTING_STATUSES = {
 };
 
 /** The exact rule copy shown to guests who try to go past the 1-seat limit. */
-export const GUEST_LIMIT_ERROR =
+const GUEST_LIMIT_ERROR =
   "You can only book up to 1 seat without logging in. Login to book more seats.";
 
 /** My bookings */
@@ -105,6 +106,10 @@ export async function POST(req: NextRequest) {
     passengerNationality, // dropdown value from /lib/nationalities
     passengerGender, // "male" | "female" | "other"
   } = body;
+  let travelDateDate: Date;
+  try { travelDateDate = nairobiDayRange(travelDate ?? nairobiDate(new Date())).start; }
+  catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
+  if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
 
   // ── Primary passenger details (required for every booking) ────────────────
   const fullName = String(passengerName || "").trim();
@@ -227,7 +232,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Auto-allocation
-  const travelDateDate = travelDate ? new Date(`${travelDate}T00:00:00`) : new Date();
   const allocation = await allocateBooking({
     bookingId: booking.id,
     routeId: route.id,

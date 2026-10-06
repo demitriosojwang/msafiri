@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { resolvePaymentMode } from "@/lib/runtime-mode";
 import { db } from "@/lib/db";
 
 /**
@@ -7,9 +8,8 @@ import { db } from "@/lib/db";
  * RESOLUTION ORDER for credentials: environment variables first, then the
  * credentials saved in Admin → Payments (PlatformConfig). When the four core
  * fields exist (consumer key, consumer secret, shortcode, passkey) the client
- * goes LIVE against Safaricom Daraja; otherwise every call falls through to
- * the deterministic demo simulator, so the whole platform stays demonstrable
- * before real API access arrives.
+ * uses Safaricom Daraja. Missing credentials fail closed outside explicitly
+ * enabled local development; only that local preview may use the simulator.
  *
  * Applying real credentials is therefore zero-code: paste them in the admin
  * console (or set the env vars) and press "Test connection". Nothing else
@@ -162,7 +162,7 @@ export async function resolveDaraja(): Promise<DarajaCredentials> {
   const forcedMock = (process.env.MPESA_MODE || "").trim().toLowerCase() === "mock";
   const complete =
     !!creds.consumerKey && !!creds.consumerSecret && !!creds.shortcode && !!creds.passkey;
-  creds.mode = !forcedMock && complete ? "live" : "mock";
+  creds.mode = resolvePaymentMode(complete, forcedMock);
   return creds;
 }
 
@@ -536,6 +536,10 @@ export async function transactionStatus(
 // ─── Reversal (full refund, short window) ────────────────────────────────────
 
 export interface DarajaResultCode {
+  settled?: boolean;
+  conversationId?: string;
+  originatorId?: string;
+  receipt?: string;
   resultCode: string;
   resultDesc: string;
 }
@@ -545,6 +549,7 @@ export async function reversal(params: {
   amount: number;
 }): Promise<DarajaResultCode> {
   const creds = await resolveDaraja();
+  if(creds.mode!=="mock")return {resultCode:"NOT_CONFIGURED",resultDesc:"Live refunds require a durable refund attempt and verified settlement callback. No reversal was sent."};
   if (creds.mode === "mock") {
     if (state.injectNextRefundFailure) {
       state.injectNextRefundFailure = false;
@@ -614,8 +619,14 @@ export async function b2c(params: {
   receiverPhone: string;
   amount: number;
   remarks?: string;
+  resultUrl?: string;
+  timeoutUrl?: string;
+  originatorId?: string;
 }): Promise<DarajaResultCode> {
   const creds = await resolveDaraja();
+  if (creds.mode !== "mock" && (!params.resultUrl || !params.timeoutUrl || !params.originatorId)) {
+    throw new Error("B2C requires a durable settlement attempt and correlated callback endpoints.");
+  }
   if (creds.mode === "mock") {
     if (state.injectNextPayoutFailure) {
       state.injectNextPayoutFailure = false;
@@ -632,7 +643,9 @@ export async function b2c(params: {
     }
     return {
       resultCode: RESULT_CODES.SUCCESS,
-      resultDesc: `B2C of KSh ${params.amount} to ${params.receiverPhone} accepted`,
+      resultDesc: "Local simulated settlement confirmed",
+      settled: true,
+      receipt: generateMpesaReceipt(),
     };
   }
 
@@ -657,7 +670,7 @@ export async function b2c(params: {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        OriginatorConversationID: `MR-${Date.now()}-${crypto.randomInt(1000, 9999)}`,
+        OriginatorConversationID: params.originatorId,
         InitiatorName: creds.initiatorName,
         SecurityCredential: initiator,
         CommandID: "BusinessPayment",
@@ -665,19 +678,24 @@ export async function b2c(params: {
         PartyA: creds.b2cShortcode || creds.shortcode,
         PartyB: party,
         Remarks: (params.remarks || "Mi-Reli payout").slice(0, 100),
-        QueueTimeOutURL: urls.stkTimeout,
-        ResultURL: urls.b2cResult,
+        QueueTimeOutURL: params.timeoutUrl,
+        ResultURL: params.resultUrl,
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       ResponseCode?: string;
       ResponseDescription?: string;
       errorMessage?: string;
+      ConversationID?: string;
+      OriginatorConversationID?: string;
     };
     if (data.ResponseCode === "0") {
       return {
-        resultCode: RESULT_CODES.SUCCESS,
+        resultCode: "ACCEPTED",
         resultDesc: data.ResponseDescription || "B2C accepted",
+        settled: false,
+        conversationId: data.ConversationID,
+        originatorId: data.OriginatorConversationID || params.originatorId,
       };
     }
     return {

@@ -47,26 +47,22 @@ type PayMethod = "stk" | "paybill";
 type PayStep = "phone" | "stk" | "paybill" | "verifying" | "done";
 
 export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
+  return open ? <PaySheetContent key={booking.id} open={open} onClose={onClose} booking={booking} onPaid={onPaid} /> : null;
+}
+
+function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [method, setMethod] = useState<PayMethod>("stk");
   const [paybill, setPaybill] = useState<string | null>(null);
   const [step, setStep] = useState<PayStep>("phone");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(booking.passengerPhone || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ receipt: string; amount: number } | null>(null);
-  const [driver, setDriver] = useState<DriverContact | null>(null);
+  const [driver, setDriver] = useState<DriverContact | null>(booking.driver ?? null);
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setMethod("stk");
-      setStep("phone");
-      // Prefill from the guest's booking details (Tahmeed-style checkout).
-      setPhone(booking.passengerPhone || "");
-      setError(null);
-      setReceipt(null);
-      setDriver(booking.driver ?? null);
-      setCopied(null);
       // Which payment options are live? Paybill appears once the platform's
       // shortcode is configured (Admin → Payments).
       api<{ paybill: string | null; methods: string[] }>("/api/pay/options")

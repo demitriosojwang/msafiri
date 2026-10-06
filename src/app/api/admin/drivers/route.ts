@@ -33,7 +33,7 @@ export async function GET() {
       earnings: {
         lifetimeGross: d.payouts.filter((p) => p.status !== "failed").reduce((s, p) => s + p.grossFareTotal, 0),
         queued: d.payouts.filter((p) => p.status === "queued").reduce((s, p) => s + p.netPayoutAmount, 0),
-        paid: d.payouts.filter((p) => p.status === "completed").reduce((s, p) => s + p.netPayoutAmount, 0),
+        paid: d.payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.netPayoutAmount, 0),
         failed: d.payouts.filter((p) => p.status === "failed").reduce((s, p) => s + p.netPayoutAmount, 0),
       },
       recentPayouts: d.payouts.slice(0, 5).map((p) => ({
@@ -41,7 +41,7 @@ export async function GET() {
         gross: p.grossFareTotal,
         commission: p.commissionAmount,
         net: p.netPayoutAmount,
-        status: p.status,
+        status: p.status==="completed"&&!p.settlementVerified?"needs_review":p.status,
         result: p.mpesaResultCode,
         initiatedAt: p.initiatedAt,
       })),
