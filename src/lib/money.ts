@@ -22,10 +22,8 @@ import {DriverError} from "@/lib/driver/errors";
 export const NTSA_COMMISSION_CAP = 0.18;
 
 export async function getConfig() {
-  let cfg = await db.platformConfig.findUnique({ where: { id: "main" } });
-  if (!cfg) {
-    cfg = await db.platformConfig.create({ data: { id: "main" } });
-  }
+  const cfg = await db.platformConfig.findUnique({ where: { id: "main" } });
+  if (!cfg) throw new DriverError(503,"PLATFORM_NOT_CONFIGURED","Booking and settlement settings require operations setup.");
   return cfg;
 }
 

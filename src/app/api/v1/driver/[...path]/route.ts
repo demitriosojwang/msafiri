@@ -4,12 +4,12 @@ import {DriverError, integer} from "@/lib/driver/errors";
 import {onboarding, saveProfile, submitApplication, uploadDocument, driverEligibility} from "@/lib/driver/onboarding";
 import {maxDocumentBytes} from "@/lib/driver/catalogue";
 import {driverEarnings} from "@/lib/driver/earnings";
-import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {supportCases,createSupportCase} from "@/lib/driver/support";
 import {driverTrips,driverTripCommand} from "@/lib/driver/trips";
 import {requestPayoutDestination} from "@/lib/driver/beneficiary";
 import {after} from "next/server";
 import {dispatchInstantPayouts} from "@/lib/money";
+import {driverServiceStatus} from "@/lib/driver/readiness";
 
 export const runtime="nodejs";
 type Context={params:Promise<{path:string[]}>};
@@ -24,8 +24,11 @@ async function boundedBody(req:Request, max:number) {
 async function handler(req:Request,context:Context) {
   try {
     const path=(await context.params).path.join("/");
-    if(path==="status" && req.method==="GET")return Response.json({apiVersion:"v1",simulation:isLocalDemoEnabled()},{headers:{"Cache-Control":"no-store"}});
-    const json=async()=>{try {const body=JSON.parse((await boundedBody(req,16384)).toString());if(!body || Array.isArray(body) || typeof body!=="object")throw new Error();return body as Record<string,unknown>;}catch(error){if(error instanceof DriverError)throw error;throw new DriverError(400,"INVALID_JSON","Invalid request body.");}};
+    if(path==="status" && req.method==="GET")return Response.json(driverServiceStatus(),{headers:{"Cache-Control":"no-store"}});
+    const json=async()=>{
+      if(req.headers.get("content-type")?.split(";")[0].trim().toLowerCase()!=="application/json")throw new DriverError(415,"JSON_REQUIRED","Send an application/json request.");
+      try {const body=JSON.parse((await boundedBody(req,16384)).toString());if(!body || Array.isArray(body) || typeof body!=="object")throw new Error();return body as Record<string,unknown>;}catch(error){if(error instanceof DriverError)throw error;throw new DriverError(400,"INVALID_JSON","Invalid request body.");}
+    };
     if(path==="auth/challenges" && req.method==="POST") return Response.json(await requestChallenge((await json()).phone),{headers:{"Cache-Control":"no-store"}});
     if(path==="auth/sessions" && req.method==="POST") return Response.json(await verifyChallenge(await json()),{headers:{"Cache-Control":"no-store"}});
     const session=await requireDriver(req), driverId=session.driverId;

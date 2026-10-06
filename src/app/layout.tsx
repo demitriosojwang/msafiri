@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { connection } from "next/server";
 
 export const metadata: Metadata = {
   title: "Mi-Reli — Reliable rides from the SGR terminus",
@@ -17,11 +18,13 @@ export const viewport: Viewport = {
   themeColor: "#26304a",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Nonce-based CSP requires a fresh server render for every document request.
+  await connection();
   return (
     <html lang="en" suppressHydrationWarning>
       <body

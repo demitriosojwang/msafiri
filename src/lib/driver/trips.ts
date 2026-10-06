@@ -21,9 +21,9 @@ function tripDto(t:TripRecord,driverId:string,eligible:boolean) {
   const contact=active && eligible && ["accepted","at_pickup","in_progress"].includes(phase);
   return {id:t.id,version:progress?.version??0,phase,status:t.status,routeName:t.route.name,direction:t.direction,
     departureAt:t.departureAt,capacity:t.capacity,serviceType:t.bookings.some(b=>b.isCharter)?"charter":"shared",
-    stages:t.route.stages.map(s=>({name:s.name,latitude:s.lat,longitude:s.lng})),
+    stages:t.route.stages.map(s=>({id:s.id,order:s.order,name:s.name,latitude:s.lat,longitude:s.lng})),
     passengers:active&&eligible?t.bookings.map(b=>({id:b.id,name:b.passengerName||b.passenger.name||"Passenger",seats:b.seats,status:b.status,
-      ...boardingCounts(b),stageName:b.stageName,homePickup:b.homePickup,homeAddress:contact?b.homeAddress:null,
+      ...boardingCounts(b),stageId:b.stageId,stageName:b.stageName,homePickup:b.homePickup,homeAddress:contact?b.homeAddress:null,
       phone:contact?(b.passengerPhone||b.passenger.phone):null})):[],
     // Boarding codes are supplied by passengers, never returned on the manifest.
     contactAvailable:contact};

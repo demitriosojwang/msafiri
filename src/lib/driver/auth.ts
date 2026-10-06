@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import { db } from "@/lib/db";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { DriverError, text } from "./errors";
-import {POLICY_VERSION} from "./catalogue";
+import {driverRegistrationConfigured} from "./readiness";
 
 export const hashToken = (value: string) => createHash("sha256").update(value).digest("hex");
 function secret() {
@@ -33,7 +33,7 @@ async function limit(scope: string, max: number, windowMs: number) {
 export async function requestChallenge(phoneInput: unknown) {
   const phone = phoneNumber(phoneInput);
   const demo = isLocalDemoEnabled();
-  if(!demo && (process.env.DRIVER_POLICY_VERSION!==POLICY_VERSION || !process.env.DRIVER_PRIVACY_URL?.startsWith("https://") || !process.env.DRIVER_TERMS_URL?.startsWith("https://")))
+  if(!driverRegistrationConfigured())
     throw new DriverError(503,"ONBOARDING_NOT_CONFIGURED","Driver registration is not open yet.");
   if (!demo && (!process.env.AT_USERNAME || !process.env.AT_API_KEY))
     throw new DriverError(503, "SMS_NOT_CONFIGURED", "Driver sign-in is temporarily unavailable.");
