@@ -13,7 +13,8 @@ administrator production sign-in remain disabled until verified authentication
 is configured. Driver SMS authentication is implemented; live setup is pending.
 No live database has been connected or migrated.
 
-The implemented driver API is `/api/v1/driver`: verified session access, private
+The implemented driver API is `/api/v1/driver`: verified session access, separate
+existing-driver sign-in and new-application availability, private
 onboarding, compliance review, assigned-trip commands, statement/beneficiary review
 and support. Driver operations use the same passenger bookings and payment ledger.
 Accepted B2C requests remain processing until a correlated settlement result.

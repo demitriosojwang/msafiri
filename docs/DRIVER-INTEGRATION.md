@@ -6,7 +6,11 @@ Only the server uses Prisma/PostgreSQL; Android uses authenticated HTTPS.
 
 ## Implemented contract — 6 October 2026
 
-- `/api/v1/driver/status`, POST `auth/challenges`, POST `auth/sessions`, DELETE
+- `/api/v1/driver/status` returns separate `phoneSignInOpen` and
+  `registrationOpen` flags. Existing drivers can authenticate while new
+  applications are paused; an unknown verified number cannot create a driver
+  account unless intake is open. The status request itself never sends an SMS.
+- POST `auth/challenges`, POST `auth/sessions`, DELETE
   `auth/session`: environment assertion, verified phone, hashed revocable sessions.
 - GET/PUT `onboarding`, POST `documents/{type}`, POST `onboarding/submissions`:
   private evidence, expiry/checklist, optimistic versions and audited staff review.

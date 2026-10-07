@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import { db } from "@/lib/db";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { DriverError, text } from "./errors";
-import {driverRegistrationConfigured} from "./readiness";
+import {driverPhoneSignInConfigured,driverRegistrationConfigured} from "./readiness";
 
 export const hashToken = (value: string) => createHash("sha256").update(value).digest("hex");
 function secret() {
@@ -33,9 +33,7 @@ async function limit(scope: string, max: number, windowMs: number) {
 export async function requestChallenge(phoneInput: unknown) {
   const phone = phoneNumber(phoneInput);
   const demo = isLocalDemoEnabled();
-  if(!driverRegistrationConfigured())
-    throw new DriverError(503,"ONBOARDING_NOT_CONFIGURED","Driver registration is not open yet.");
-  if (!demo && (!process.env.AT_USERNAME || !process.env.AT_API_KEY))
+  if(!driverPhoneSignInConfigured())
     throw new DriverError(503, "SMS_NOT_CONFIGURED", "Driver sign-in is temporarily unavailable.");
   await limit(`send:${phone}`, 1, 60000);
   await limit(`daily:${phone}`, 12, 86400000);
@@ -71,6 +69,10 @@ export async function verifyChallenge(input: Record<string, unknown>) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 12 * 3600000);
   const driver = await db.$transaction(async tx => {
+    const existing=await tx.driver.findUnique({where:{phone:challenge.phone}});
+    // Recruiting may be paused while current drivers still sign in. Do not create a
+    // new driver/application unless the independently guarded intake is open.
+    if(!existing&&!driverRegistrationConfigured())throw denied();
     const consumed = await tx.driverAuthChallenge.updateMany({where: {id, consumedAt: null, expiresAt: {gt: new Date()}}, data: {consumedAt: new Date()}});
     if (consumed.count !== 1) throw denied();
     const record = await tx.driver.upsert({where: {phone: challenge.phone}, update: {}, create: {phone: challenge.phone, mpesaNumber: challenge.phone, name: "New applicant", plate: "", cabType: "", capacity: 1, status: "applicant"}});

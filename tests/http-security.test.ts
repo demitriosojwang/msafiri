@@ -3,7 +3,7 @@ import {NextRequest} from "next/server";
 import {contentSecurityPolicy,rejectBrowserMutation} from "@/lib/http-security";
 import {proxy} from "@/proxy";
 import {GET,POST} from "@/app/api/v1/driver/[...path]/route";
-import {driverRegistrationConfigured,securePolicyUrl} from "@/lib/driver/readiness";
+import {driverPhoneSignInConfigured,driverRegistrationConfigured,driverServiceStatus,securePolicyUrl} from "@/lib/driver/readiness";
 import {text} from "@/lib/driver/errors";
 import {POLICY_VERSION} from "@/lib/driver/catalogue";
 
@@ -62,8 +62,15 @@ describe("untrusted driver API requests do not reach a database",()=>{
   it("reports closed registration when production prerequisites are absent",async()=>{
     vi.stubEnv("NODE_ENV","production");vi.stubEnv("MIRELI_DEMO_MODE","false");vi.stubEnv("DRIVER_AUTH_SECRET","");
     const response=await GET(new Request(`${origin}/api/v1/driver/status`),context("status"));
-    const body=await response.json();expect(body.registrationOpen).toBe(false);expect(body.simulation).toBe(false);
+    const body=await response.json();expect(body.registrationOpen).toBe(false);expect(body.phoneSignInOpen).toBe(false);expect(body.simulation).toBe(false);
     expect(body).not.toHaveProperty("DRIVER_AUTH_SECRET");
+  });
+  it("keeps existing-driver sign-in independent from paused new-driver intake",()=>{
+    vi.stubEnv("NODE_ENV","production");vi.stubEnv("MIRELI_DEMO_MODE","false");
+    vi.stubEnv("DRIVER_AUTH_SECRET","a".repeat(48));vi.stubEnv("AT_USERNAME","configured");vi.stubEnv("AT_API_KEY","configured");
+    expect(driverPhoneSignInConfigured()).toBe(true);
+    expect(driverRegistrationConfigured()).toBe(false);
+    expect(driverServiceStatus()).toMatchObject({phoneSignInOpen:true,registrationOpen:false});
   });
   it("requires private storage and reviewed HTTPS policies before opening registration",()=>{
     vi.stubEnv("NODE_ENV","production");vi.stubEnv("MIRELI_DEMO_MODE","false");
