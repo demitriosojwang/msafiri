@@ -5,8 +5,11 @@ the seed script. Existing databases are preserved. Sample insertion requires the
 explicit `--with-sample-data` argument. Never pass it against production.
 Reading missing PlatformConfig now returns 503 instead of writing guessed defaults.
 
-Driver registration reports unavailable unless OTP, private document storage and
-policy configuration are present. Presence is not provider or compliance proof.
+Driver registration remains fail-closed until real staff authentication exists,
+as well as OTP, private document storage, malware scanning, a named compliance
+review roster and policy configuration. The production administrator login still
+returns 503, so adding environment values alone cannot turn intake on. Presence is
+not provider or compliance proof.
 Prisma binds query values; no raw SQL is assembled from driver input. JSON bodies
 are bounded and validated. React and native Android render plain text.
 
