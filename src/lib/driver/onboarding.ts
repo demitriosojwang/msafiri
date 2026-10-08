@@ -5,13 +5,14 @@ import {DriverError, integer, text} from "./errors";
 import {applicableRequirements, POLICY_VERSION, maxDocumentBytes, requirements, validFile} from "./catalogue";
 import {deleteDocument, saveDocument} from "./storage";
 import {nairobiDate} from "@/lib/nairobi-time";
+import {phoneNumber} from "./auth";
 
 const documentFields = {id:true,type:true,mime:true,bytes:true,expiresAt:true,state:true,scanState:true,reviewReason:true,createdAt:true} as const;
 export async function onboarding(driverId: string) {
   const app = await db.driverApplication.findUnique({where:{driverId},include:{driver:true,documents:{where:{state:{not:"replaced"}},orderBy:{createdAt:"desc"},select:documentFields}}});
   if (!app) throw new DriverError(404,"APPLICATION_NOT_FOUND","Application not found.");
   return {application:{id:app.id,status:app.status,version:app.version,licenceClass:app.licenceClass,ownsVehicle:app.ownsVehicle,reviewReason:app.reviewReason,submittedAt:app.submittedAt,documents:app.documents},
-    profile:{fullName:app.driver.name,phone:app.driver.phone,plate:app.driver.plate,capacity:app.driver.capacity,cabType:app.driver.cabType},
+    profile:{fullName:app.driver.name,phone:app.driver.phone,email:app.driver.email,plate:app.driver.plate,capacity:app.driver.capacity,cabType:app.driver.cabType},
     requirements:applicableRequirements(app.ownsVehicle),policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
 }
 export async function saveProfile(driverId:string, body:Record<string,unknown>) {
@@ -20,9 +21,12 @@ export async function saveProfile(driverId:string, body:Record<string,unknown>) 
   const capacity=integer(body.capacity,"Passenger capacity",1,60), licenceClass=text(body.licenceClass,"Licence class",1,20),cabType=text(body.cabType,"Vehicle type",2,80);
   if(typeof body.ownsVehicle!=="boolean") throw new DriverError(400,"INVALID_INPUT","Vehicle ownership is required.");
   await db.$transaction(async tx=>{
+    const current=await tx.driver.findUniqueOrThrow({where:{id:driverId}});
+    const phone=phoneNumber(body.phone??current.phone);
+    if(current.phone && current.phone!==phone)throw new DriverError(409,"PHONE_CHANGE_REVIEW_REQUIRED","Contact support to change an existing phone number.");
     const updated=await tx.driverApplication.updateMany({where:{driverId,version,status:{in:["draft","changes_requested","approved"]}},data:{version:{increment:1},licenceClass,ownsVehicle:body.ownsVehicle as boolean,status:"draft",reviewedBy:null,reviewedAt:null}});
     if(updated.count!==1) throw new DriverError(409,"STALE_APPLICATION","Refresh the application before editing. Submitted applications cannot be changed during review.");
-    await tx.driver.update({where:{id:driverId},data:{name:fullName,plate,capacity,cabType,status:"applicant"}});
+    await tx.driver.update({where:{id:driverId},data:{name:fullName,phone,plate,capacity,cabType,status:"applicant"}});
   });
   return onboarding(driverId);
 }
@@ -58,7 +62,7 @@ export async function submitApplication(driverId:string,body:Record<string,unkno
     if(!app) throw new DriverError(404,"APPLICATION_NOT_FOUND","Application not found.");
     if(app.status==="submitted" && app.version===version+1 && app.policyVersion===POLICY_VERSION) return;
     if(app.version!==version || !["draft","changes_requested"].includes(app.status)) throw new DriverError(409,"STALE_APPLICATION","Refresh before submitting.");
-    if(app.driver.name.length<3 || !app.driver.plate || !app.licenceClass || !app.driver.cabType) throw new DriverError(400,"INCOMPLETE_PROFILE","Complete driver and vehicle details.");
+    if(app.driver.name.length<3 || !app.driver.phone || !app.driver.plate || !app.licenceClass || !app.driver.cabType) throw new DriverError(400,"INCOMPLETE_PROFILE","Complete driver contact and vehicle details.");
     const missing=applicableRequirements(app.ownsVehicle).filter(r=>r.required).filter(r=>!app.documents.some(d=>d.type===r.id && d.state!=="rejected" && (!d.expiresAt || d.expiresAt>new Date())));
     if(missing.length) throw new DriverError(400,"MISSING_DOCUMENTS",`Attach current evidence: ${missing.map(r=>r.title).join(", ")}.`);
     const updated=await tx.driverApplication.updateMany({where:{id:app.id,version},data:{status:"submitted",version:{increment:1},policyVersion:POLICY_VERSION,submittedAt:new Date()}});

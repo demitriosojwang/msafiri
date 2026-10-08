@@ -31,7 +31,9 @@ model Passenger {
 model Driver {
   id          String         @id @default(cuid())
   name        String
-  phone       String         @unique
+  phone       String?        @unique
+  email       String?        @unique
+  emailVerifiedAt DateTime?
   mpesaNumber String
   plate       String
   cabType     String
@@ -298,13 +300,16 @@ model DriverPayoutDestination {
 
 model DriverAuthChallenge {
   id String @id @default(cuid())
-  phone String
+  phone String?
+  email String?
+  channel String @default("sms")
   codeHash String
   expiresAt DateTime
   consumedAt DateTime?
   attempts Int @default(0)
   createdAt DateTime @default(now())
   @@index([phone, createdAt])
+  @@index([email, createdAt])
 }
 
 model DriverRateLimit {

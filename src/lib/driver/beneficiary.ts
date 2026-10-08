@@ -3,7 +3,7 @@ import {DriverError,integer,text} from "./errors";
 import {phoneNumber} from "./auth";
 export async function requestPayoutDestination(driverId:string,body:Record<string,unknown>) {
   const expectedVersion=integer(body.expectedVersion,"Version"),accountName=text(body.accountName,"M-Pesa account name",3,100);
-  if(body.acknowledged!==true)throw new DriverError(400,"ACKNOWLEDGEMENT_REQUIRED","Confirm that this verified phone is your M-Pesa account.");
+  if(body.acknowledged!==true)throw new DriverError(400,"ACKNOWLEDGEMENT_REQUIRED","Confirm that your profile phone is your M-Pesa account. Finance must verify ownership before approval.");
   await db.$transaction(async tx=>{
     const driver=await tx.driver.findUniqueOrThrow({where:{id:driverId}}),phone=phoneNumber(driver.phone);
     const current=await tx.driverPayoutDestination.findUnique({where:{driverId}});
