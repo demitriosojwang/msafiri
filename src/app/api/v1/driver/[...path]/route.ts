@@ -10,6 +10,7 @@ import {requestPayoutDestination} from "@/lib/driver/beneficiary";
 import {after} from "next/server";
 import {dispatchInstantPayouts} from "@/lib/money";
 import {driverServiceStatus} from "@/lib/driver/readiness";
+import {requestDriverRoute} from "@/lib/driver/navigation";
 
 export const runtime="nodejs";
 type Context={params:Promise<{path:string[]}>};
@@ -41,6 +42,7 @@ async function handler(req:Request,context:Context) {
     else if(path==="earnings" && req.method==="GET") result=await driverEarnings(driverId,new URL(req.url));
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
+    else if(path==="navigation/route" && req.method==="POST")result=await requestDriverRoute(driverId,await json());
     else if(/^trips\/[^/]+\/commands$/.test(path) && req.method==="POST"){
       const body=await json(),tripId=path.split("/")[1];result=await driverTripCommand(driverId,tripId,body);
       if(body.action==="complete")after(()=>dispatchInstantPayouts(driverId,tripId));

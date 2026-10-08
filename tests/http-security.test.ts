@@ -54,6 +54,10 @@ describe("untrusted driver API requests do not reach a database",()=>{
     const response=await GET(new Request(`${origin}/api/v1/driver/me`,{headers:{authorization:"Bearer ' OR 1=1 --"}}),context("me"));
     expect(response.status).toBe(401);
   });
+  it("requires a driver session before route requests can reach trip or routing services",async()=>{
+    const response=await POST(new Request(`${origin}/api/v1/driver/navigation/route`,{method:"POST",headers:{authorization:"Bearer invalid-token","content-type":"application/json"},body:"{}"}),context("navigation/route"));
+    expect(response.status).toBe(401);
+  });
   it("retains apostrophes as data while rejecting malformed types and controls",()=>{
     expect(text("O'Connor","Name",2,100)).toBe("O'Connor");
     expect(()=>text({$ne:null},"Name",2,100)).toThrow();

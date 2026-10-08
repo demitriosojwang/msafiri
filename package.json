@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "prisma generate && next build --webpack",
+    "build": "node scripts/deployment-build.mjs",
     "start": "next start -p 3000",
     "lint": "eslint src tests scripts/preview-local.mjs scripts/seed-preview.mjs",
     "typecheck": "tsc --noEmit",

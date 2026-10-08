@@ -1,5 +1,6 @@
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {POLICY_VERSION} from "./catalogue";
+import {navigationRoutingConfigured} from "./navigation";
 
 // Do not open real driver intake while the deployed staff login is still the
 // prototype (src/app/api/admin/auth/route.ts returns 503 in production).
@@ -36,6 +37,7 @@ export function driverServiceStatus() {
   const phoneSignInOpen=driverPhoneSignInConfigured();
   const registrationOpen=driverRegistrationConfigured();
   return {apiVersion: "v1", simulation: isLocalDemoEnabled(), phoneSignInOpen, registrationOpen,
+    navigationOpen:navigationRoutingConfigured(),
     supportEmail: "mirelisgr001@gmail.com",
     message: !phoneSignInOpen ? "Driver phone sign-in is not configured yet." :
       !registrationOpen ? "Existing drivers can sign in. New driver applications are paused." :

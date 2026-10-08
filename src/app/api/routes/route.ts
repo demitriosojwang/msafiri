@@ -1,10 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { runOperationalTick } from "@/lib/engine";
 
 /** Network map for the booking form: routes with ordered stages + fares. */
 export async function GET() {
-  await runOperationalTick();
+  try {
   const routes = await db.route.findMany({
     where: { active: true },
     include: { stages: { orderBy: { order: "asc" } } },
@@ -24,4 +23,7 @@ export async function GET() {
       })),
     })),
   });
+  } catch {
+    return NextResponse.json({error: "The route catalogue is temporarily unavailable."}, {status: 503});
+  }
 }
