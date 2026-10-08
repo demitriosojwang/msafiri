@@ -1,6 +1,6 @@
 # Mireli backend restoration verification
 
-Date: 8 October 2026. Production promotion remains pending explicit approval.
+Date: 8 October 2026. Production replacement explicitly approved by the user and deployed successfully.
 
 ## Root causes and changes
 
@@ -26,13 +26,13 @@ Cryptographically random driver and session authentication secrets were configur
 - Latest protected preview: `dpl_FceRXRSBZ8FGw1H2DVwHYEbQD4vR`, https://msafiri-klc0o5hy6-demitriosojwang-4569s-projects.vercel.app . Vercel reports Ready.
 - Preview `/api/v1/driver/status`: 200, `simulation:false`, `phoneSignInOpen:false`, `registrationOpen:false`, `navigationOpen:false`.
 - Preview `/api/routes`: 200 with `{routes:[]}`. Preview `/api/trains`: 200 with `{trains:[]}`. Unauthenticated driver `/me`: 401 in the preceding verified preview. Home: 200 in the preceding verified preview.
-- Official production driver status remains 404. Production promotion was rejected by automatic approval review because replacing the passenger application needs specific user approval; no workaround was used.
+- Approved production deployment: `dpl_6xkDjjooYk9kSJ4K2exenF9ff7Z1`. Vercel reports Ready and assigns the official `https://mireli-tau.vercel.app` alias. Live HTTP verification: home 200; driver status 200 (`simulation:false`, phone sign-in, registration and navigation closed); routes and trains 200 with empty catalogues; unauthenticated driver `/me` 401. No bootstrap flag was supplied for this production deployment.
 
 ## Steps required to finish
 
-1. Obtain the user's specific approval for the prepared production replacement, then perform a normal production build with the bootstrap flag absent/false and verify the official alias.
+1. Production restoration is complete and the official alias is verified. Preserve the honest readiness gates while configuring the remaining real services.
 2. Configure the company's actual Africa's Talking live account credentials (`AT_USERNAME`, `AT_API_KEY`, and its approved sender if required). Check provider credit and delivery. The user supplied an owned test number, but no real SMS has been sent.
 3. Verify SMS delivery and a real authenticated driver session separately. New-driver registration remains deliberately closed until private document handling, malware scanning, named reviewer permissions, reviewed public policies and verified staff authentication are ready. The current database has no existing driver accounts; do not seed an approved driver or bypass this gate to claim sign-in success.
-4. Reconcile and publish the verified backend source without letting an older Git main deployment revert the restored API. A push to the connected web main branch can deploy production, so it must respect the pending production approval.
+4. Remote main was fetched and confirmed to be an ancestor of the verified restoration (zero remote-only commits). Publish with a normal fast-forward push, then verify the official API again so future Git deployments retain the restored backend.
 
-This record verifies a working protected preview and initialized schema. It does not certify a working live SMS sign-in, onboarding service, passenger booking operation, payout service or Play release.
+This record verifies a working production driver API and initialized schema. It does not certify a working live SMS sign-in, onboarding service, passenger booking operation, payout service or Play release.
